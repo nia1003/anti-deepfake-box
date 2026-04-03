@@ -1,0 +1,54 @@
+# Anti-Deepfake-Box: Default Configuration
+# Override any section via CLI flags in scripts/.
+
+device: "cuda"   # "cuda" | "cpu"
+
+# ------------------------------------------------------------------ #
+#  Preprocessing (Single Source of Truth)                             #
+# ------------------------------------------------------------------ #
+preprocessing:
+  fps_target: 25.0
+  insightface_model: "buffalo_sc"   # buffalo_l for higher accuracy
+  insightface_batch_size: 32
+  face_cache_dir: ".face_cache"
+  use_face_cache: true
+  sample_rate: 16000   # audio extraction sample rate
+  channels: 1
+
+# ------------------------------------------------------------------ #
+#  Detectors                                                           #
+# ------------------------------------------------------------------ #
+detectors:
+  visual:
+    pretrained: ""      # path to FF++ XceptionNet checkpoint
+    max_frames: 32      # evenly-sampled frames per video
+    batch_size: 16
+    device: "cuda"
+
+  rppg:
+    pretrained: ""      # path to PhysNet checkpoint (UBFC-rPPG pretrained)
+    snr_threshold: 1.5  # calibrate via scripts/calibrate_snr.py
+    snr_scale: 1.0      # sigmoid steepness
+    device: "cuda"
+
+  sync:
+    syncnet_path: ""    # path to LatentSync SyncNet checkpoint
+    whisper_model: "tiny"
+    whisper_device: "cpu"   # CPU to avoid VRAM competition
+    device: "cuda"
+
+# ------------------------------------------------------------------ #
+#  Fusion                                                              #
+# ------------------------------------------------------------------ #
+fusion:
+  mode: "weighted"     # "weighted" | "meta"
+  threshold: 0.50      # decision threshold
+  weights:
+    visual: 0.50
+    rppg:   0.25
+    sync:   0.25
+  meta:
+    hidden_dims: [512, 256]
+    dropout: 0.3
+    input_mode: "scores"   # "scores" | "features" | "both"
+    model_path: ""         # path to trained MetaClassifier weights

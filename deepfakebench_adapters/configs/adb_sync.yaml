@@ -1,0 +1,47 @@
+# DeepfakeBench detector config for ADB Sync Detector (LatentSync SyncNet)
+# Requires audio: data_dict must contain 'video_path' for on-the-fly audio extraction.
+
+model_name: 'adb_sync'
+
+# LatentSync SyncNet checkpoint
+syncnet_path: 'checkpoints/latentsync_syncnet.pth'
+
+# Whisper configuration (CPU recommended to avoid VRAM competition)
+whisper_model: 'tiny'
+whisper_device: 'cpu'
+
+loss_func: 'cross_entropy'
+
+use_data_augmentation: false
+
+resolution: 256
+with_landmark: false
+with_mask: false
+
+train_batchSize: 16
+test_batchSize: 16
+nEpochs: 20
+workers: 4
+
+optimizer:
+  type: 'adam'
+  adam:
+    lr: 0.0001
+    weight_decay: 0.0
+    beta1: 0.9
+    beta2: 0.999
+    eps: 1.0e-8
+    amsgrad: false
+
+lr_scheduler: 'cosine'
+lr_T_max: 20
+lr_eta_min: 0.0
+
+metric_scoring: 'auc'
+
+compression: 'c23'
+frame_num:
+  train: 25   # ~1 second SyncNet window
+  test: 25
+video_mode: true
+clip_size: 25
