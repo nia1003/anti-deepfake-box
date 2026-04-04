@@ -1,0 +1,70 @@
+# Training Configuration (activate after validation passes)
+# Validation gate:
+#   FF++ AUC-ensemble > 0.95  AND  Celeb-DF v2 AUC-ensemble > 0.85
+
+device: "cuda"
+
+preprocessing:
+  fps_target: 25.0
+  insightface_model: "buffalo_sc"
+  insightface_batch_size: 32
+  face_cache_dir: ".face_cache/train"
+  use_face_cache: true
+  sample_rate: 16000
+  channels: 1
+
+detectors:
+  visual:
+    pretrained: "checkpoints/xception_ff_c23.pth"
+    max_frames: 32
+    batch_size: 16
+    device: "cuda"
+  rppg:
+    pretrained: "checkpoints/physnet_ubfc.pth"
+    snr_threshold: 1.5
+    snr_scale: 1.0
+    device: "cuda"
+  sync:
+    syncnet_path: "checkpoints/latentsync_syncnet.pth"
+    whisper_model: "tiny"
+    whisper_device: "cpu"
+    device: "cuda"
+
+fusion:
+  mode: "meta"
+  threshold: 0.50
+  weights:
+    visual: 0.50
+    rppg:   0.25
+    sync:   0.25
+  meta:
+    hidden_dims: [512, 256]
+    dropout: 0.3
+    input_mode: "scores"
+    model_path: "checkpoints/meta_classifier_best.pth"
+
+# ------------------------------------------------------------------ #
+#  Training parameters                                                 #
+# ------------------------------------------------------------------ #
+training:
+  # Track A: Baseline alignment (FF++ only)
+  ff_data_root: "/data/FF++"
+  compression: "c23"
+
+  # Track B: Extended datasets for meta-classifier generalisation
+  dfdc_data_root: "/data/DFDC"        # set empty "" if unavailable
+  celebdf_data_root: "/data/Celeb-DF"
+
+  # Optimisation
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  epochs: 100
+  batch_size: 64
+  num_workers: 8
+
+  # Output
+  save_dir: "checkpoints"
+  metric_scoring: "auc"   # "auc" | "eer" | "acc" | "ap"
+
+  # Stage control
+  freeze_backbones: true   # false for Stage 3 end-to-end fine-tuning

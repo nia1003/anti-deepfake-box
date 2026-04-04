@@ -1,0 +1,48 @@
+# FF++ Evaluation Configuration
+# Inherits all settings from default.yaml; override dataset-specific params.
+
+device: "cuda"
+
+preprocessing:
+  fps_target: 25.0
+  insightface_model: "buffalo_sc"
+  insightface_batch_size: 32
+  face_cache_dir: ".face_cache/ff"
+  use_face_cache: true
+  sample_rate: 16000
+  channels: 1
+
+detectors:
+  visual:
+    pretrained: "checkpoints/xception_ff_c23.pth"
+    max_frames: 32
+    batch_size: 16
+    device: "cuda"
+  rppg:
+    pretrained: "checkpoints/physnet_ubfc.pth"
+    snr_threshold: 1.5    # will be updated after calibrate_snr.py
+    snr_scale: 1.0
+    device: "cuda"
+  sync:
+    syncnet_path: "checkpoints/latentsync_syncnet.pth"
+    whisper_model: "tiny"
+    whisper_device: "cpu"
+    device: "cuda"
+
+fusion:
+  mode: "weighted"
+  threshold: 0.50
+  weights:
+    visual: 0.50
+    rppg:   0.25
+    sync:   0.25
+
+# FF++ dataset settings (used by evaluate.py)
+dataset:
+  type: "ff++"
+  compression: "c23"
+  manipulation_types:
+    - Deepfakes
+    - Face2Face
+    - FaceSwap
+    - NeuralTextures

@@ -1,0 +1,55 @@
+# DeepfakeBench detector config for ADB Visual Detector (XceptionNet)
+# Usage: python training/train.py --detector_path path/to/adb_visual.yaml
+
+model_name: 'adb_visual'
+
+# Pretrained XceptionNet weights (FF++ c23 trained)
+visual_pretrained: 'checkpoints/xception_ff_c23.pth'
+
+# Loss function
+loss_func: 'cross_entropy'
+
+# Data augmentation
+use_data_augmentation: true
+data_aug:
+  flip_prob: 0.5
+  rotate_limit: 10
+  rotate_prob: 0.5
+  blur_limit: 3
+  blur_prob: 0.3
+  brightness_limit: 0.2
+  contrast_limit: 0.2
+  quality_lower: 40
+  quality_upper: 100
+
+resolution: 256
+with_landmark: false
+with_mask: false
+
+# Training
+train_batchSize: 32
+test_batchSize: 32
+nEpochs: 30
+workers: 4
+
+optimizer:
+  type: 'adam'
+  adam:
+    lr: 0.0001
+    weight_decay: 0.0
+    beta1: 0.9
+    beta2: 0.999
+    eps: 1.0e-8
+    amsgrad: false
+
+lr_scheduler: 'cosine'
+lr_T_max: 30
+lr_eta_min: 0.0
+
+metric_scoring: 'auc'
+
+compression: 'c23'
+frame_num:
+  train: 32
+  test: 32
+video_mode: false
