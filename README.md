@@ -55,7 +55,6 @@ preprocessing/face_extractor.py
 ```bash
 git clone https://github.com/nia1003/anti-deepfake-box.git
 cd anti-deepfake-box
-git checkout claude/integrate-deepfake-detection-frameworks-Uvq1K
 
 pip install -r requirements.txt
 
