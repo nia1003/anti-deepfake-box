@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model checkpoints (large binary files)
+checkpoints/*.pth
+checkpoints/*.pt
+checkpoints/*.ckpt
+checkpoints/*.bin
+checkpoints/*.onnx
+
+# Face cache (generated, video-specific)
+.face_cache/
+
+# Temporary / runtime files
+*.log
+*.tmp
+/tmp/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Results (generated outputs)
+results/*.json
+results/*.csv
+cache/
+
+# Audio temp files
+*.wav
+*.mp3
