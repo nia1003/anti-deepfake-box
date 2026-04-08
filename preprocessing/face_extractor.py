@@ -80,8 +80,10 @@ class FaceTrack:
                        std: Tuple = (0.5, 0.5, 0.5)) -> np.ndarray:
         """(T, 3, H, W) float32 normalised tensor-ready array."""
         crops = self.crops_for_resolution(size).astype(np.float32) / 255.0
-        crops = (crops - np.array(mean)) / np.array(std)
-        return crops.transpose(0, 3, 1, 2)  # (T, 3, H, W)
+        mean_arr = np.array(mean, dtype=np.float32)
+        std_arr = np.array(std, dtype=np.float32)
+        crops = (crops - mean_arr) / std_arr
+        return crops.transpose(0, 3, 1, 2).astype(np.float32)  # (T, 3, H, W)
 
 
 class UnifiedFaceExtractor:

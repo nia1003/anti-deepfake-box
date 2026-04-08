@@ -151,21 +151,27 @@ class RPPGDetector(BaseDetector):
 
     def load(self) -> None:
         try:
-            from neural_methods.model.PhysNet import PhysNet
-            self.model = PhysNet(S=2, in_ch=3, out_ch=1)
+            # rPPG-Toolbox uses PhysNet_padding_Encoder_Decoder_MAX as the class name
+            from neural_methods.model.PhysNet import PhysNet_padding_Encoder_Decoder_MAX as PhysNet
+            self.model = PhysNet(frames=self.CHUNK_SIZE)
             if self.pretrained_path and Path(self.pretrained_path).exists():
                 state = torch.load(self.pretrained_path, map_location="cpu")
+                # State dict is stored directly (not nested under "model_state_dict")
                 if isinstance(state, dict) and "model_state_dict" in state:
                     state = state["model_state_dict"]
                 self.model.load_state_dict(state, strict=False)
             self.model.eval()
             self.model = self.model.to(self.device)
-        except ImportError:
+        except (ImportError, Exception) as e:
             self.model = None  # Will use CHROM fallback
 
     def _extract_ppg_neural(self, crops_128: np.ndarray) -> np.ndarray:
-        """PhysNet forward pass: (T, 128, 128, 3) → (T,) PPG waveform."""
-        # PhysNet expects (B, C, T, H, W) with T = CHUNK_SIZE
+        """PhysNet forward pass: (T, 128, 128, 3) → (T,) PPG waveform.
+
+        PhysNet_padding_Encoder_Decoder_MAX:
+          Input : (B, C, T, H, W) = (1, 3, CHUNK_SIZE, 128, 128)
+          Output: tuple; out[0] shape = (B, T)
+        """
         T = len(crops_128)
         chunk = crops_128[:self.CHUNK_SIZE] if T >= self.CHUNK_SIZE else crops_128
 
@@ -180,8 +186,10 @@ class RPPGDetector(BaseDetector):
         x = x.to(self.device)
 
         with torch.no_grad():
-            rppg = self.model(x)  # (1, T) or (1, 1, T)
-            rppg = rppg.squeeze().cpu().numpy()
+            out = self.model(x)
+            # PhysNet returns a tuple; PPG signal is out[0] with shape (B, T)
+            rppg = out[0].squeeze().cpu().numpy() if isinstance(out, (tuple, list)) \
+                else out.squeeze().cpu().numpy()
 
         return rppg[:T].astype(np.float32)
 
