@@ -1,7 +1,7 @@
 # Anti-Deepfake-Box: Default Configuration
 # Override any section via CLI flags in scripts/.
 
-device: "cuda"   # "cuda" | "cpu"
+device: "cpu"   # "cuda" | "cpu"  — changed to cpu for trial run (no CUDA available)
 
 # ------------------------------------------------------------------ #
 #  Preprocessing (Single Source of Truth)                             #
@@ -20,22 +20,22 @@ preprocessing:
 # ------------------------------------------------------------------ #
 detectors:
   visual:
-    pretrained: ""      # path to FF++ XceptionNet checkpoint
-    max_frames: 32      # evenly-sampled frames per video
-    batch_size: 16
-    device: "cuda"
+    pretrained: ""      # no FF++ checkpoint available; will use EfficientNet fallback
+    max_frames: 32
+    batch_size: 8
+    device: "cpu"
 
   rppg:
-    pretrained: ""      # path to PhysNet checkpoint (UBFC-rPPG pretrained)
-    snr_threshold: 1.5  # calibrate via scripts/calibrate_snr.py
-    snr_scale: 1.0      # sigmoid steepness
-    device: "cuda"
+    pretrained: "checkpoints/physnet_ubfc.pth"   # MA-UBFC PhysNet
+    snr_threshold: 1.5
+    snr_scale: 1.0
+    device: "cpu"
 
   sync:
-    syncnet_path: ""    # path to LatentSync SyncNet checkpoint
+    syncnet_path: ""    # no SyncNet checkpoint; uses motion heuristic fallback
     whisper_model: "tiny"
-    whisper_device: "cpu"   # CPU to avoid VRAM competition
-    device: "cuda"
+    whisper_device: "cpu"
+    device: "cpu"
 
 # ------------------------------------------------------------------ #
 #  Fusion                                                              #
