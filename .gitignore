@@ -18,9 +18,12 @@ env/
 # Jupyter
 .ipynb_checkpoints/
 
-# Model checkpoints (large binary files)
-checkpoints/*.pth
-checkpoints/*.pt
+# Model checkpoints — large base models (not committed)
+checkpoints/physnet_ubfc.pth
+checkpoints/stable_syncnet.pt
+checkpoints/xception_ff_c23.pth
+# Trained outputs ARE committed (small MLP weights)
+# checkpoints/meta_classifier_best.pth  ← tracked by git
 checkpoints/*.ckpt
 checkpoints/*.bin
 checkpoints/*.onnx
