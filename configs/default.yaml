@@ -1,7 +1,7 @@
 # Anti-Deepfake-Box: Default Configuration
 # Override any section via CLI flags in scripts/.
 
-device: "cpu"   # "cuda" | "cpu"  — changed to cpu for trial run (no CUDA available)
+device: "cuda"   # "cuda" | "cpu"
 
 # ------------------------------------------------------------------ #
 #  Preprocessing (Single Source of Truth)                             #
@@ -20,22 +20,22 @@ preprocessing:
 # ------------------------------------------------------------------ #
 detectors:
   visual:
-    pretrained: ""      # no FF++ checkpoint available; will use EfficientNet fallback
+    pretrained: "checkpoints/xception_ff_c23.pth"   # FF++ c23 XceptionNet (download via Colab notebook)
     max_frames: 32
     batch_size: 8
-    device: "cpu"
+    device: "cuda"
 
   rppg:
-    pretrained: "checkpoints/physnet_ubfc.pth"   # MA-UBFC PhysNet
+    pretrained: "checkpoints/physnet_ubfc.pth"   # MA-UBFC PhysNet (from rPPG-Toolbox repo)
     snr_threshold: 1.5
     snr_scale: 1.0
-    device: "cpu"
+    device: "cuda"
 
   sync:
-    syncnet_path: ""    # no SyncNet checkpoint; uses motion heuristic fallback
+    syncnet_path: "checkpoints/stable_syncnet.pt"   # ByteDance/LatentSync-1.6 (download via Colab notebook)
     whisper_model: "tiny"
-    whisper_device: "cpu"
-    device: "cpu"
+    whisper_device: "cpu"   # CPU to avoid VRAM competition with other models
+    device: "cuda"
 
 # ------------------------------------------------------------------ #
 #  Fusion                                                              #
