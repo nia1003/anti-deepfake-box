@@ -32,7 +32,7 @@ detectors:
     device: "cuda"
 
   sync:
-    syncnet_path: "checkpoints/stable_syncnet.pt"   # ByteDance/LatentSync-1.6 (download via Colab notebook)
+    syncnet_path: "checkpoints/latentsync_syncnet.pth"   # ByteDance/LatentSync-1.6 (download via Colab notebook)
     whisper_model: "tiny"
     whisper_device: "cpu"   # CPU to avoid VRAM competition with other models
     device: "cuda"

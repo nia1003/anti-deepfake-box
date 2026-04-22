@@ -8,7 +8,7 @@ Usage:
 What this script does:
     1. physnet_ubfc.pth    — PhysNet (rPPG), copied from third_party/rPPG-Toolbox
                              or cloned on-the-fly from GitHub
-    2. stable_syncnet.pt   — LatentSync SyncNet, downloaded from HuggingFace
+    2. latentsync_syncnet.pth   — LatentSync SyncNet, downloaded from HuggingFace
                              ByteDance/LatentSync-1.6
     3. xception_ff_c23.pth — XceptionNet, ImageNet pretrained base (timm).
                              NOTE: this is NOT the FF++ fine-tuned version.
@@ -79,8 +79,8 @@ def download_physnet():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def download_syncnet():
-    header("2/3  SyncNet  →  checkpoints/stable_syncnet.pt")
-    dst = CHECKPOINTS / "stable_syncnet.pt"
+    header("2/3  SyncNet  →  checkpoints/latentsync_syncnet.pth")
+    dst = CHECKPOINTS / "latentsync_syncnet.pth"
     if dst.exists():
         ok(f"already exists ({dst.stat().st_size / 1e6:.1f} MB)")
         return
@@ -92,7 +92,7 @@ def download_syncnet():
     info("Downloading from ByteDance/LatentSync-1.6 on HuggingFace...")
     path = hf_hub_download(
         repo_id="ByteDance/LatentSync-1.6",
-        filename="stable_syncnet.pt",
+        filename="latentsync_syncnet.pth",
         local_dir=str(CHECKPOINTS),
     )
     ok(f"downloaded to {path} ({Path(path).stat().st_size / 1e6:.1f} MB)")
@@ -143,7 +143,7 @@ def print_summary():
     print("Checkpoints ready:")
     files = {
         "physnet_ubfc.pth":    "PhysNet rPPG detector (UBFC pretrained)",
-        "stable_syncnet.pt":   "LatentSync SyncNet (ByteDance, 94% acc)",
+        "latentsync_syncnet.pth":   "LatentSync SyncNet (ByteDance, 94% acc)",
         "xception_ff_c23.pth": "XceptionNet 2-class (ImageNet base *)",
     }
     for fname, desc in files.items():
