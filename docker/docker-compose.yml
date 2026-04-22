@@ -2,7 +2,9 @@ version: "3.9"
 
 services:
   adb-api:
-    build: ..
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: anti-deepfake-box
     ports:
       - "8000:8000"
@@ -21,7 +23,9 @@ services:
 
   # GPU variant (uncomment + set profile=cloud or jetson_orin)
   # adb-api-gpu:
-  #   build: ..
+  #   build:
+  #     context: ..
+  #     dockerfile: docker/Dockerfile
   #   runtime: nvidia
   #   environment:
   #     - ADB_PROFILE=cloud
