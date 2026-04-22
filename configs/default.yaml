@@ -26,10 +26,9 @@ detectors:
     device: "cuda"
 
   rppg:
-    pretrained: "checkpoints/physnet_ubfc.pth"   # MA-UBFC PhysNet (from rPPG-Toolbox repo)
-    snr_threshold: 1.5
+    snr_threshold: 1.5   # calibrate via scripts/calibrate_snr.py
     snr_scale: 1.0
-    device: "cuda"
+    device: "cpu"        # POS is pure NumPy — no GPU needed
 
   sync:
     syncnet_path: "checkpoints/latentsync_syncnet.pth"   # ByteDance/LatentSync-1.6 (download via Colab notebook)

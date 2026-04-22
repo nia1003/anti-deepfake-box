@@ -5,7 +5,7 @@ preprocessing:
   fps_target: 10.0
 detectors:
   visual:  { enabled: true,  pretrained: "", max_frames: 8, batch_size: 4, device: "cuda" }  # EfficientNet fallback
-  rppg:    { enabled: true,  pretrained: "", device: "cpu" }   # CHROM fallback (no PhysNet on 2GB)
+  rppg:    { enabled: true,  device: "cpu" }                   # POS: pure NumPy, no checkpoint needed
   sync:    { enabled: false }
   fft:     { enabled: true,  weight: 0.20, fft_max_frames: 8 }
 fusion:

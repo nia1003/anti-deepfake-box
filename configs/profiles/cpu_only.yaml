@@ -5,7 +5,7 @@ preprocessing:
   fps_target: 5.0
 detectors:
   visual:  { enabled: false }           # too slow on CPU
-  rppg:    { enabled: true, pretrained: "", device: "cpu" }  # CHROM only
+  rppg:    { enabled: true, device: "cpu" }                 # POS: pure NumPy, no checkpoint
   sync:    { enabled: false }
   fft:     { enabled: true, weight: 0.40, fft_max_frames: 8 }
 fusion:

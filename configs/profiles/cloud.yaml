@@ -2,7 +2,7 @@
 device: "cuda"
 detectors:
   visual:  { enabled: true,  pretrained: "checkpoints/xception_ff_c23.pth", max_frames: 32, batch_size: 16, device: "cuda" }
-  rppg:    { enabled: true,  pretrained: "checkpoints/physnet_ubfc.pth", device: "cuda" }
+  rppg:    { enabled: true,  device: "cpu" }                            # POS: no checkpoint, pure NumPy
   sync:    { enabled: true,  syncnet_path: "checkpoints/latentsync_syncnet.pth", whisper_model: "small", whisper_device: "cuda", device: "cuda" }
   fft:     { enabled: true,  weight: 0.10, fft_max_frames: 16 }
 fusion:

@@ -1,36 +1,69 @@
 """
-rPPG-based Deepfake Detector.
+rPPG-based Deepfake Detector using POS (Plane-Orthogonal-to-Skin).
 
-Principle: real human faces exhibit periodic blood volume pulse (PPG) signals
-in subtle skin colour variations. Synthetic deepfake faces typically lack these
-genuine physiological signals, resulting in a low signal-to-noise ratio (SNR)
-when a pre-trained rPPG model tries to extract a waveform from them.
+POS is an unsupervised signal processing algorithm — no checkpoint or GPU
+required. It projects skin-colour vectors onto a plane orthogonal to the
+illumination direction to isolate the blood volume pulse (BVP). Deepfake
+faces lack genuine physiological periodicity, resulting in low SNR.
 
-Pipeline:
-1. FaceTrack.crops_128 (T, 128, 128, 3) → PhysNet → PPG waveform (T,)
-2. Compute SNR via Welch PSD in the physiological HR band (0.75–3.5 Hz)
-3. Map SNR → fake score via sigmoid: low SNR = more likely fake
-4. Fallback to CHROM (unsupervised) when T < 30
-
-SNR threshold is calibrated on FF++ validation set via
-scripts/calibrate_snr.py (Youden's J statistic).
+Reference: Wang et al. (2017). Algorithmic principles of remote PPG.
+           IEEE Transactions on Biomedical Engineering, 64(7), 1479-1491.
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+import math
 from typing import Optional
 
 import numpy as np
-import torch
 
 from .base_detector import BaseDetector
 from preprocessing.face_extractor import FaceTrack
 
-_RPPG_PATH = Path(__file__).parent.parent / "third_party" / "rppg-toolbox"
-if _RPPG_PATH.exists():
-    sys.path.insert(0, str(_RPPG_PATH))
+
+# ------------------------------------------------------------------ #
+#  POS algorithm (Wang 2017)                                           #
+# ------------------------------------------------------------------ #
+
+def _pos_wang(frames: np.ndarray, fps: float) -> np.ndarray:
+    """
+    Parameters
+    ----------
+    frames : (T, H, W, 3) uint8 RGB
+    fps    : frames per second
+
+    Returns
+    -------
+    bvp : (T,) float64  bandpass-filtered blood volume pulse
+    """
+    from scipy import signal as sp_signal
+
+    T = len(frames)
+    l = max(2, math.ceil(1.6 * fps))  # sliding window length
+
+    # Mean RGB per frame: (T, 3)
+    rgb = frames.astype(np.float64).reshape(T, -1, 3).mean(axis=1)
+
+    H = np.zeros(T, dtype=np.float64)
+    _P = np.array([[0.0, 1.0, -1.0], [-2.0, 1.0, 1.0]])  # projection matrix
+
+    for n in range(l, T):
+        m = n - l
+        chunk = rgb[m:n]                              # (l, 3)
+        mean_c = chunk.mean(axis=0) + 1e-6
+        Cn = (chunk / mean_c).T                       # (3, l)
+
+        S = _P @ Cn                                   # (2, l)
+        alpha = np.std(S[0]) / (np.std(S[1]) + 1e-9)
+        h = S[0] + alpha * S[1]
+        h -= h.mean()
+        H[m:n] += h
+
+    # Bandpass 0.75–3 Hz (physiological HR range: ~45–180 bpm)
+    nyq = fps / 2.0
+    b, a = sp_signal.butter(1, [0.75 / nyq, min(3.0 / nyq, 0.99)], btype='bandpass')
+    bvp = sp_signal.filtfilt(b, a, H)
+    return bvp
 
 
 # ------------------------------------------------------------------ #
@@ -44,18 +77,9 @@ def compute_ppg_snr(
     hr_high: float = 3.5,
 ) -> float:
     """
-    Compute signal-to-noise ratio of a PPG waveform.
+    Compute signal-to-noise ratio of a PPG/BVP waveform.
 
-    Parameters
-    ----------
-    ppg      : 1-D waveform, length T
-    fps      : frames per second
-    hr_low   : lower bound of physiological HR band (Hz), corresponds to ~45 bpm
-    hr_high  : upper bound of physiological HR band (Hz), corresponds to ~210 bpm
-
-    Returns
-    -------
-    SNR in dB (float). Higher = more physiologically plausible = more likely real.
+    Returns SNR in dB. Higher = more physiologically plausible = more likely real.
     """
     from scipy import signal as sp_signal
 
@@ -63,11 +87,9 @@ def compute_ppg_snr(
     if T < 8:
         return -np.inf
 
-    # Welch PSD
     nperseg = min(T, 256)
     freqs, psd = sp_signal.welch(ppg, fs=fps, nperseg=nperseg)
 
-    # Signal power in HR band
     hr_mask = (freqs >= hr_low) & (freqs <= hr_high)
     noise_mask = ~hr_mask & (freqs > 0)
 
@@ -75,56 +97,18 @@ def compute_ppg_snr(
     noise_power = float(psd[noise_mask].mean()) if noise_mask.any() else 1e-6
     noise_power = max(noise_power, 1e-9)
 
-    snr_db = 10.0 * np.log10(signal_power / noise_power + 1e-9)
-    return snr_db
+    return 10.0 * np.log10(signal_power / noise_power + 1e-9)
 
 
 def snr_to_fake_score(snr: float, threshold: float = 1.5, scale: float = 1.0) -> float:
     """
     Map SNR to fake probability via reverse sigmoid.
 
-    snr < threshold  → fake_score → 1   (low SNR = likely fake)
-    snr >> threshold → fake_score → 0   (high SNR = likely real)
+    snr << threshold → fake_score → 1  (low SNR = likely fake)
+    snr >> threshold → fake_score → 0  (high SNR = likely real)
     """
     x = -(snr - threshold) * scale
     return float(1.0 / (1.0 + np.exp(-x)))
-
-
-# ------------------------------------------------------------------ #
-#  CHROM fallback (unsupervised, no model required)                    #
-# ------------------------------------------------------------------ #
-
-def chrom_ppg(crops_rgb: np.ndarray) -> np.ndarray:
-    """
-    CHROM unsupervised rPPG algorithm.
-    Reference: De Haan & Jeanne (2013).
-
-    Parameters
-    ----------
-    crops_rgb : (T, H, W, 3) uint8
-
-    Returns
-    -------
-    ppg : (T,) float32
-    """
-    T = len(crops_rgb)
-    rgb = crops_rgb.astype(np.float32).reshape(T, -1, 3)
-    mean_rgb = rgb.mean(axis=1)  # (T, 3)
-
-    # Normalise by temporal mean
-    mean_rgb_bar = mean_rgb.mean(axis=0, keepdims=True) + 1e-6
-    cn = mean_rgb / mean_rgb_bar  # (T, 3)
-
-    Xs = 3 * cn[:, 0] - 2 * cn[:, 1]
-    Ys = 1.5 * cn[:, 0] + cn[:, 1] - 1.5 * cn[:, 2]
-
-    std_xs = np.std(Xs) + 1e-6
-    std_ys = np.std(Ys) + 1e-6
-    alpha = std_xs / std_ys
-
-    ppg = Xs - alpha * Ys
-    ppg -= ppg.mean()
-    return ppg.astype(np.float32)
 
 
 # ------------------------------------------------------------------ #
@@ -133,65 +117,19 @@ def chrom_ppg(crops_rgb: np.ndarray) -> np.ndarray:
 
 class RPPGDetector(BaseDetector):
     """
-    PhysNet-based rPPG detector for deepfake identification.
+    POS-based rPPG detector for deepfake identification.
 
-    Uses SNR of extracted PPG waveform as a proxy for physiological plausibility.
-    Low SNR on deepfake faces → high fake score.
+    No pretrained weights or GPU needed. Works on any number of frames.
+    SNR threshold is calibrated on FF++ val set via scripts/calibrate_snr.py.
     """
-
-    MIN_FRAMES_FOR_NEURAL = 30
-    CHUNK_SIZE = 180
 
     def __init__(self, config: dict):
         super().__init__(config)
-        self.pretrained_path: str = config.get("rppg_pretrained", "")
         self.snr_threshold: float = config.get("snr_threshold", 1.5)
         self.snr_scale: float = config.get("snr_scale", 1.0)
-        self.model = None
 
     def load(self) -> None:
-        try:
-            # rPPG-Toolbox uses PhysNet_padding_Encoder_Decoder_MAX as the class name
-            from neural_methods.model.PhysNet import PhysNet_padding_Encoder_Decoder_MAX as PhysNet
-            self.model = PhysNet(frames=self.CHUNK_SIZE)
-            if self.pretrained_path and Path(self.pretrained_path).exists():
-                state = torch.load(self.pretrained_path, map_location="cpu")
-                # State dict is stored directly (not nested under "model_state_dict")
-                if isinstance(state, dict) and "model_state_dict" in state:
-                    state = state["model_state_dict"]
-                self.model.load_state_dict(state, strict=False)
-            self.model.eval()
-            self.model = self.model.to(self.device)
-        except (ImportError, Exception) as e:
-            self.model = None  # Will use CHROM fallback
-
-    def _extract_ppg_neural(self, crops_128: np.ndarray) -> np.ndarray:
-        """PhysNet forward pass: (T, 128, 128, 3) → (T,) PPG waveform.
-
-        PhysNet_padding_Encoder_Decoder_MAX:
-          Input : (B, C, T, H, W) = (1, 3, CHUNK_SIZE, 128, 128)
-          Output: tuple; out[0] shape = (B, T)
-        """
-        T = len(crops_128)
-        chunk = crops_128[:self.CHUNK_SIZE] if T >= self.CHUNK_SIZE else crops_128
-
-        # Pad if needed
-        if len(chunk) < self.CHUNK_SIZE:
-            pad = np.zeros((self.CHUNK_SIZE - len(chunk), 128, 128, 3), np.uint8)
-            chunk = np.concatenate([chunk, pad], axis=0)
-
-        # (T, 128, 128, 3) → (1, 3, T, 128, 128) float32 [0,1]
-        x = chunk.astype(np.float32) / 255.0
-        x = torch.from_numpy(x).permute(3, 0, 1, 2).unsqueeze(0)  # (1, 3, T, H, W)
-        x = x.to(self.device)
-
-        with torch.no_grad():
-            out = self.model(x)
-            # PhysNet returns a tuple; PPG signal is out[0] with shape (B, T)
-            rppg = out[0].squeeze().cpu().numpy() if isinstance(out, (tuple, list)) \
-                else out.squeeze().cpu().numpy()
-
-        return rppg[:T].astype(np.float32)
+        pass  # POS requires no model weights
 
     def _detect_impl(
         self,
@@ -201,44 +139,23 @@ class RPPGDetector(BaseDetector):
         if face_track is None or face_track.T == 0:
             return None
 
-        crops_128 = face_track.crops_128
-        T = face_track.T
-        fps = face_track.fps
-
-        if self.model is not None and T >= self.MIN_FRAMES_FOR_NEURAL:
-            ppg = self._extract_ppg_neural(crops_128)
-        else:
-            ppg = chrom_ppg(crops_128)
-
-        snr = compute_ppg_snr(ppg, fps=fps)
+        bvp = _pos_wang(face_track.crops_128, fps=face_track.fps)
+        snr = compute_ppg_snr(bvp, fps=face_track.fps)
         return snr_to_fake_score(snr, self.snr_threshold, self.snr_scale)
 
     def get_ppg_and_snr(self, face_track: FaceTrack) -> dict:
-        """
-        Debug/calibration helper: return raw PPG waveform + SNR + fake score.
-        """
+        """Debug/calibration helper: return raw BVP waveform + SNR + fake score."""
         if not self._loaded:
             self.load()
             self._loaded = True
 
-        crops_128 = face_track.crops_128
-        T = face_track.T
-        fps = face_track.fps
-
-        if self.model is not None and T >= self.MIN_FRAMES_FOR_NEURAL:
-            ppg = self._extract_ppg_neural(crops_128)
-            method = "PhysNet"
-        else:
-            ppg = chrom_ppg(crops_128)
-            method = "CHROM"
-
-        snr = compute_ppg_snr(ppg, fps=fps)
-        fake_score = snr_to_fake_score(snr, self.snr_threshold, self.snr_scale)
+        bvp = _pos_wang(face_track.crops_128, fps=face_track.fps)
+        snr = compute_ppg_snr(bvp, fps=face_track.fps)
 
         return {
-            "ppg": ppg,
+            "ppg": bvp,
             "snr_db": snr,
-            "fake_score": fake_score,
-            "method": method,
-            "num_frames": T,
+            "fake_score": snr_to_fake_score(snr, self.snr_threshold, self.snr_scale),
+            "method": "POS",
+            "num_frames": face_track.T,
         }

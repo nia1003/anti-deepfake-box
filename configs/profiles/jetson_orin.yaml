@@ -5,7 +5,7 @@ preprocessing:
   fps_target: 15.0
 detectors:
   visual:  { enabled: true,  pretrained: "checkpoints/xception_ff_c23.pth", max_frames: 16, batch_size: 8, device: "cuda" }
-  rppg:    { enabled: true,  pretrained: "checkpoints/physnet_ubfc.pth", device: "cuda" }
+  rppg:    { enabled: true,  device: "cpu" }                            # POS: no checkpoint, pure NumPy
   sync:    { enabled: false }
   fft:     { enabled: true,  weight: 0.15, fft_max_frames: 8 }
 fusion:
