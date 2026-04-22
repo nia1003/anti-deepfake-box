@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  adb-api:
+    build: ..
+    container_name: anti-deepfake-box
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../checkpoints:/app/checkpoints:ro
+      - ../configs:/app/configs:ro
+      - adb-cache:/app/.face_cache
+    environment:
+      - ADB_PROFILE=cpu_only        # override: cloud, jetson_orin, jetson_nano
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # GPU variant (uncomment + set profile=cloud or jetson_orin)
+  # adb-api-gpu:
+  #   build: ..
+  #   runtime: nvidia
+  #   environment:
+  #     - ADB_PROFILE=cloud
+  #     - NVIDIA_VISIBLE_DEVICES=all
+
+volumes:
+  adb-cache:

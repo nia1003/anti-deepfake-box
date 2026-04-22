@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { width:200px; padding:12px; font-family:monospace; font-size:13px; }
+  button { width:100%; padding:8px; margin-top:8px; cursor:pointer;
+           border:none; border-radius:4px; font-size:13px; }
+  #toggle { background:#3a7; color:#fff; }
+  #toggle.off { background:#e55; }
+  .label { color:#555; font-size:11px; margin-top:8px; }
+</style>
+</head>
+<body>
+  <b>Anti-Deepfake-Box</b>
+  <p class="label">Real-time deepfake detection</p>
+  <button id="toggle">Enable Detection</button>
+  <p class="label">Server: <span id="srv">checking...</span></p>
+  <script>
+    let enabled = false;
+    const btn = document.getElementById('toggle');
+    btn.onclick = () => {
+      enabled = !enabled;
+      btn.textContent = enabled ? 'Disable Detection' : 'Enable Detection';
+      btn.classList.toggle('off', enabled);
+      chrome.tabs.query({active:true,currentWindow:true}, tabs =>
+        chrome.tabs.sendMessage(tabs[0].id, {action:'toggle'})
+      );
+    };
+    fetch('http://localhost:8000/health')
+      .then(r => r.json())
+      .then(() => { document.getElementById('srv').textContent = 'online ✓'; })
+      .catch(() => { document.getElementById('srv').textContent = 'offline ✗'; });
+  </script>
+</body>
+</html>
