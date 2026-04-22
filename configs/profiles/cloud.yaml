@@ -1,0 +1,10 @@
+# Full pipeline — cloud GPU server (A10/V100/A100)
+device: "cuda"
+detectors:
+  visual:  { enabled: true,  pretrained: "checkpoints/xception_ff_c23.pth", max_frames: 32, batch_size: 16, device: "cuda" }
+  rppg:    { enabled: true,  pretrained: "checkpoints/physnet_ubfc.pth", device: "cuda" }
+  sync:    { enabled: true,  syncnet_path: "checkpoints/stable_syncnet.pt", whisper_model: "small", whisper_device: "cuda", device: "cuda" }
+  fft:     { enabled: true,  weight: 0.10, fft_max_frames: 16 }
+fusion:
+  mode: "weighted"
+  weights: { visual: 0.45, rppg: 0.20, sync: 0.25, fft: 0.10 }

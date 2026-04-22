@@ -1,0 +1,13 @@
+# Jetson Nano 2GB/4GB (128-core Maxwell GPU)
+device: "cuda"
+preprocessing:
+  insightface_batch_size: 8
+  fps_target: 10.0
+detectors:
+  visual:  { enabled: true,  pretrained: "", max_frames: 8, batch_size: 4, device: "cuda" }  # EfficientNet fallback
+  rppg:    { enabled: true,  pretrained: "", device: "cpu" }   # CHROM fallback (no PhysNet on 2GB)
+  sync:    { enabled: false }
+  fft:     { enabled: true,  weight: 0.20, fft_max_frames: 8 }
+fusion:
+  mode: "weighted"
+  weights: { visual: 0.50, rppg: 0.30, fft: 0.20 }

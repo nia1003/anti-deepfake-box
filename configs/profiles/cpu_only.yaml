@@ -1,0 +1,13 @@
+# CPU-only (Raspberry Pi, $3 VPS, CI/CD)
+device: "cpu"
+preprocessing:
+  insightface_batch_size: 4
+  fps_target: 5.0
+detectors:
+  visual:  { enabled: false }           # too slow on CPU
+  rppg:    { enabled: true, pretrained: "", device: "cpu" }  # CHROM only
+  sync:    { enabled: false }
+  fft:     { enabled: true, weight: 0.40, fft_max_frames: 8 }
+fusion:
+  mode: "weighted"
+  weights: { rppg: 0.60, fft: 0.40 }

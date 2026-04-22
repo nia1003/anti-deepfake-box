@@ -1,0 +1,13 @@
+# Jetson Orin Nano/NX (8 GB unified memory, 1024-core GPU)
+device: "cuda"
+preprocessing:
+  insightface_batch_size: 16
+  fps_target: 15.0
+detectors:
+  visual:  { enabled: true,  pretrained: "checkpoints/xception_ff_c23.pth", max_frames: 16, batch_size: 8, device: "cuda" }
+  rppg:    { enabled: true,  pretrained: "checkpoints/physnet_ubfc.pth", device: "cuda" }
+  sync:    { enabled: false }
+  fft:     { enabled: true,  weight: 0.15, fft_max_frames: 8 }
+fusion:
+  mode: "weighted"
+  weights: { visual: 0.55, rppg: 0.30, fft: 0.15 }
