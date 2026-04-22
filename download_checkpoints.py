@@ -53,8 +53,9 @@ def download_physnet():
         ok(f"already exists ({dst.stat().st_size / 1e6:.1f} MB)")
         return
 
-    # Option A: already cloned via setup.sh
     src = THIRD_PARTY / "rPPG-Toolbox" / "final_model_release" / "MA-UBFC_physnet.pth"
+
+    # Option A: already cloned via setup.sh and source file exists
     if src.exists():
         shutil.copy(src, dst)
         ok(f"copied from {src} ({dst.stat().st_size / 1e6:.1f} MB)")
@@ -64,12 +65,22 @@ def download_physnet():
     info("Cloning rPPG-Toolbox (depth 1)...")
     THIRD_PARTY.mkdir(exist_ok=True)
     rppg_dir = THIRD_PARTY / "rPPG-Toolbox"
+
+    # Remove partial/broken clone if the target file is missing
+    if rppg_dir.exists() and not src.exists():
+        info("Removing incomplete clone and retrying...")
+        shutil.rmtree(rppg_dir)
+
     if not rppg_dir.exists():
         subprocess.check_call([
             "git", "clone", "--depth", "1",
             "https://github.com/nia1003/rppg-toolbox.git",
             str(rppg_dir),
         ])
+
+    if not src.exists():
+        raise FileNotFoundError(f"Expected {src} after clone — check repo structure")
+
     shutil.copy(src, dst)
     ok(f"downloaded and copied ({dst.stat().st_size / 1e6:.1f} MB)")
 
@@ -89,13 +100,18 @@ def download_syncnet():
     pip_install("huggingface_hub")
 
     from huggingface_hub import hf_hub_download
-    info("Downloading from ByteDance/LatentSync-1.6 on HuggingFace...")
+    # HuggingFace filename is "stable_syncnet.pt"; we save as "latentsync_syncnet.pth"
+    info("Downloading stable_syncnet.pt from ByteDance/LatentSync-1.6 on HuggingFace...")
     path = hf_hub_download(
         repo_id="ByteDance/LatentSync-1.6",
-        filename="latentsync_syncnet.pth",
+        filename="stable_syncnet.pt",
         local_dir=str(CHECKPOINTS),
     )
-    ok(f"downloaded to {path} ({Path(path).stat().st_size / 1e6:.1f} MB)")
+    # Copy to canonical name if needed
+    src = Path(path)
+    if src != dst:
+        shutil.copy(src, dst)
+    ok(f"saved as latentsync_syncnet.pth ({dst.stat().st_size / 1e6:.1f} MB)")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

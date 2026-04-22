@@ -47,11 +47,16 @@ fi
 
 # SyncNet — download from HuggingFace
 if [ ! -f "checkpoints/latentsync_syncnet.pth" ]; then
-    echo "  Downloading latentsync_syncnet.pth from HuggingFace..."
+    echo "  Downloading stable_syncnet.pt from HuggingFace..."
     python3 -c "
+import shutil
+from pathlib import Path
 from huggingface_hub import hf_hub_download
-hf_hub_download('ByteDance/LatentSync-1.6', 'latentsync_syncnet.pth', local_dir='checkpoints')
-print('  latentsync_syncnet.pth downloaded')
+path = hf_hub_download('ByteDance/LatentSync-1.6', 'stable_syncnet.pt', local_dir='checkpoints')
+dst = Path('checkpoints/latentsync_syncnet.pth')
+if Path(path) != dst:
+    shutil.copy(path, dst)
+print('  latentsync_syncnet.pth ready')
 "
 fi
 
