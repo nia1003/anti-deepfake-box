@@ -16,7 +16,9 @@ onnxruntime>=1.16.0          # CPU backend — works on Mac, Linux, Windows
                               # For GPU on Linux: pip install onnxruntime-gpu
 
 # ── Video & audio I/O ────────────────────────────────────────────────────────
-decord>=0.6.0
+# decord: optional fast video reader; auto-falls back to opencv if unavailable.
+# No Python 3.14 / macOS ARM build exists — omit from hard deps.
+# To install on supported platforms: pip install decord
 opencv-python-headless>=4.8.0
 ffmpeg-python>=0.2.0
 imageio>=2.31.0
