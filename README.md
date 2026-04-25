@@ -1,296 +1,145 @@
+這是一份為您更新後的 `README.md`。
+
+我已經將**「離線鑑識（Forensic）」**與**「線上即時（Real-time）」**雙模式的架構、OpenAI 風格的 Web 儀表板，以及瀏覽器擴充功能的整合說明加入其中。同時，我也移除了先前過於冗長且目前不再作為重心的 DeepfakeBench 底層 Adapter 程式碼，並將重心從神經網路 Meta-classifier 轉向了林教授指示的**「Pareto 最佳化網格搜索（Pareto Engine Search）」**。
+
+您可以直接複製以下內容並覆蓋原有的 `README.md`：
+
+---
+
 # Anti-Deepfake-Box
 
-**三路多模態 Deepfake 偵測框架**：整合視覺紋理 (FaceForensics++ XceptionNet)、生理訊號 (rPPG-Toolbox PhysNet + SNR) 與音視訊同步 (LatentSync SyncNet) 三路互補偵測訊號，透過可設定融合策略輸出統一 fake score，並以 DeepfakeBench 進行跨方法對齊分析驗證。
+**三路多模態 Deepfake 偵測框架與即時防護系統**：本專案整合視覺紋理 (FaceForensics++ XceptionNet)、生理訊號 (rPPG-Toolbox PhysNet + SNR) 與音視訊同步 (LatentSync SyncNet) 三路互補偵測訊號。系統具備硬體資源自適應能力，並提供雙情境模式（線上即時 / 離線鑑識），透過瀏覽器擴充功能與網頁儀表板，提供無縫的防偽防詐體驗。
 
 ---
 
-## 框架架構
+## 🌟 雙情境運行模式 (Use-Case Modes)
 
-```
-video.mp4
-    │
-    ▼ [PASS 1 — 唯一一次人臉偵測]
-preprocessing/face_extractor.py
-  └─ InsightFace (buffalo_sc)  ← SSOT 快取 (bboxes + landmarks .npz)
-       └─ FaceTrack (aligned_256)
-              │
-              ├──[resize 299×299]──▶ detectors/visual_detector.py  → visual_score
-              │                      XceptionNet (FaceForensics++ c23 pretrained)
-              │
-              ├──[resize 128×128]──▶ detectors/rppg_detector.py    → rppg_score
-              │                      PhysNet → PPG waveform → SNR → fake score
-              │                      CHROM fallback (T < 30 frames)
-              │
-              └──[256×256]──────▶  detectors/sync_detector.py     → sync_score
-                                    + audio (FFmpeg → Whisper → mel)
-                                    LatentSync SyncNet → 1 − sync_confidence
-                                    returns None if no audio track
+系統根據實務情境區分設計目標，並由 `configs/modes/` 下的設定檔動態載入：
 
-    ▼ [非同步並行管線]
-    asyncio.gather(face_extraction, audio_extraction)   # 完全並行
-    asyncio.gather(visual_det, rppg_det, sync_det)      # 三路並行
-
-    ▼ fusion/weighted_ensemble.py  (or meta_classifier.py)
-      fake_score = Σ wᵢ·scoreᵢ / Σ wᵢ
-      (None → 自動排除，weights 重歸一化)
-      Prediction: FAKE / REAL
-```
+| 特性 / 參數 | ⚡ 線上即時模式 (Real-time) | 🔬 離線鑑識模式 (Forensic) |
+| :--- | :--- | :--- |
+| **目標場景** | 一般大眾（通訊軟體即時防詐） | 執法、鑑識單位（事後分析） |
+| **設計核心** | 速度與輕量化優先（Time Critical） | 判定精準度絕對優先（不計算力代價） |
+| **判定門檻** | **50%**（Threshold 0.50） | **40%**（更嚴格，更容易標記為偽造） |
+| **音視頻同步** | 停用（節省算力） | 啟用（LatentSync + Whisper） |
+| **視覺抽幀數** | 8 幀 | 32 幀 |
+| **人臉辨識模型**| `buffalo_sc` (快速輕量) | `buffalo_l` (高精度) |
 
 ---
 
-## 三路偵測原理
+## 🏗️ 系統架構
 
-| 模態 | 來源 | 偵測原理 | 優勢 | 侷限 |
+```text
+瀏覽器播放影片 (YouTube, 視訊通話等)
+   │
+   ▼ [擴充功能 Extension] 
+ content.js 擷取畫面與音訊 ──(帶有 mode 參數的 POST)──▶ FastAPI 後端 (api/app.py)
+   │                                                       │
+   ▼                                                       ▼ [非同步並行管線]
+ [Web Dashboard]                                     1. 視覺紋理 (XceptionNet)
+ localhost:8000/                                     2. 生理訊號 (rPPG SNR)
+ 輪詢 GET /sessions 即時顯示進度與分數                 3. 音視訊同步 (SyncNet) *僅 Forensic
+   │                                                       │
+   └─ 動態條狀圖 (Animated Bars)                           ▼ [融合決策 WeightedEnsemble]
+   └─ 依據閥值顯示 FAKE / REAL ◀───────────────────────── 輸出最終 Fake Score
+```
+
+### 三路偵測原理
+
+| 模態 | 核心技術 | 偵測原理 | 優勢 | 侷限 |
 |------|------|----------|------|------|
-| **視覺/紋理** | FaceForensics++ XceptionNet | 空間偽影、GAN/擴散模型壓縮痕跡 | 高 AUC on FF++ baseline | 高壓縮易失效 |
-| **生理/PPG** | rPPG-Toolbox PhysNet+SNR | 真人有週期 PPG 訊號，deepfake 無 | 模態獨立，不受視覺欺騙 | 高品質 deepfake 可能繞過 |
-| **音視訊同步** | LatentSync SyncNet | lip-sync 偵測音視訊時序不一致 | 針對 lip-sync deepfake 有效 | 無音訊時不可用，graceful degradation |
+| **視覺紋理** | XceptionNet (FF++ 預訓練) | 辨識空間偽影、GAN/擴散模型壓縮痕跡 | 基礎準確率高 | 遇高強度影片壓縮易失效 |
+| **生理訊號** | PhysNet + SNR | 真人具備微血管搏動的週期性 PPG 訊號 | 物理特徵，不受視覺欺騙影響 | 極高品質的生成模型可能繞過 |
+| **音視同步** | LatentSync (SyncNet) | 偵測 lip-sync 時序不一致（唇音誤差） | 針對語音替換詐騙極為有效 | 無音訊時不可用 |
 
 ---
 
-## 快速開始
+## 🚀 快速開始
 
-### 安裝
+### 1. 安裝與準備
 
 ```bash
 git clone https://github.com/nia1003/anti-deepfake-box.git
 cd anti-deepfake-box
 
+# 安裝依賴
 pip install -r requirements.txt
 
-# 設定第三方子模組
+# 載入第三方子模組 (rPPG-Toolbox 等)
 git submodule update --init --recursive
-# 或：
-pip install -e third_party/rppg-toolbox
 ```
 
-### 準備模型權重
+確認您的模型權重已放置於 `checkpoints/` 目錄下：
+* `xception_ff_c23.pth`
+* `physnet_ubfc.pth`
+* `latentsync_syncnet.pth`
 
-```
-checkpoints/
-├── xception_ff_c23.pth        # FF++ XceptionNet (nia1003/faceforensics)
-├── physnet_ubfc.pth           # PhysNet (nia1003/rppg-toolbox)
-└── latentsync_syncnet.pth     # SyncNet (nia1003/latentsync)
-```
-
-更新 `configs/default.yaml` 中各 `pretrained` / `syncnet_path` 欄位。
-
-### 單影片推理
+### 2. 啟動後端伺服器與 Web Dashboard
 
 ```bash
-# 同步推理（適合單次測試）
-python scripts/inference.py --video sample.mp4 --config configs/default.yaml
-
-# 非同步推理（音訊+人臉並行提取，更快）
-python scripts/inference.py --video sample.mp4 --async_mode
-
-# 跳過無音訊的 sync 偵測器
-python scripts/inference.py --video sample.mp4 --skip sync
-
-# 使用已訓練的 meta-classifier
-python scripts/inference.py --video sample.mp4 --fusion_mode meta
+# 啟動 FastAPI 伺服器
+uvicorn api.app:app --host 0.0.0.0 --port 8000
 ```
+啟動後，請打開瀏覽器前往 `http://localhost:8000/`，您將看到 OpenAI 風格的即時監控儀表板。
 
-預期輸出：
-```
-Analysing: sample.mp4
-============================================================
-  Face track: 75 frames @ 25.0 fps (detection: 1.2s)
-  Audio extracted: /tmp/tmpXXXX.wav
-  [visual  ] score=0.8471  (0.8s)
-  [rppg    ] score=0.6343  (1.1s)
-  [sync    ] score=0.7213  (2.3s)
-
-Total async inference time: 2.5s
-============================================================
-Prediction : FAKE
-Fake Score : 0.7399 (threshold=0.50)
-  visual      : score=0.8471  weight=0.500
-  rppg        : score=0.6343  weight=0.250
-  sync        : score=0.7213  weight=0.250
-```
+### 3. 載入瀏覽器擴充功能
+1. 打開 Chrome 並前往 `chrome://extensions/`。
+2. 開啟右上角的「開發人員模式」。
+3. 點擊「載入未封裝項目」，選擇本專案內的 `extension/` 資料夾。
+4. 在擴充功能選單中，您可以自由切換 **Real-time** 或 **Forensic** 模式。當網頁播放影片時，系統即會自動開始分析。
 
 ---
 
-## 資料集驗證流程
+## 📊 參數調校與 Pareto 最佳化分析
 
-### Phase 1：rPPG SNR 閾值校準（必做）
+本專案採用雙門檻與平行融合策略。透過網格搜索（Grid Search）尋找最佳的融合權重與閥值。
 
+### Phase 1：rPPG SNR 閾值校準
+
+在融合前，必須先找出區分真人與假人的最佳 SNR 閥值：
 ```bash
 python scripts/calibrate_snr.py \
     --data_root /data/FF++ \
     --config configs/default.yaml \
     --split val \
-    --update_config   # 自動寫入最佳 threshold
+    --update_config
 ```
 
-輸出示例：
-```
-Optimal SNR threshold : 1.8432 dB
-Youden's J statistic  : 0.6721
-Mean SNR (real)       : 4.2134 dB
-Mean SNR (fake)       : 0.3891 dB
-```
+### Phase 2：Pareto 引擎網格搜索
 
-### Phase 2：FF++ 全量評估（DeepfakeBench 基準對齊）
+窮舉測試不同模組版本的排列組合與權重（α, β, γ），並繪製 FAR (誤接受率) 與 FRR (誤拒絕率) 的 Pareto 最優前沿（Pareto Front）：
 
 ```bash
-python scripts/evaluate.py \
-    --dataset ff++ \
-    --data_root /data/FF++ \
-    --compression c23 \
-    --config configs/ff_eval.yaml \
-    --split test \
-    --output results/ff_test.json
+# 收集各模組獨立分數
+python eval/score_collector.py --data_root /data/FF++ --output eval/module_scores.json
+
+# 執行網格搜索與 Pareto 分析
+python eval/engine_search.py
 ```
-
-預期指標（FF++ c23，test split，140影片）：
-
-| 偵測器 | Frame AUC | ACC | 說明 |
-|--------|-----------|-----|------|
-| Xception (DFB baseline) | ~99.7% | ~99.2% | 參考基準 |
-| ADB-Visual | ~99.5% | ~98.8% | XceptionNet wrap |
-| ADB-rPPG | ~85-90% | ~82-87% | SNR-based，輔助訊號 |
-| ADB-Sync | ~88-93% | ~85-90% | 依音訊可用性 |
-| **ADB-Ensemble** | **~99.6%** | **~99.0%** | 三路融合 |
-
-### Phase 3：跨資料集泛化（Train FF++ → Test Celeb-DF v2）
-
-在 DeepfakeBench 中使用標準 cross-dataset protocol，驗證泛化能力。
-
-**驗證閘門**（進入訓練框架的條件）：
-- ADB-Ensemble FF++ AUC > 0.95
-- ADB-Ensemble Celeb-DF v2 AUC > 0.85
+*系統將自動輸出 `pareto_configs.csv` 與 `pareto_plot.png`，並剔除無效的權重組合，保留能在安全性與便利性之間取得最佳平衡的參數，供 `configs/modes/` 引用。*
 
 ---
 
-## DeepfakeBench 對齊分析
-
-### 安裝適配器至 DeepfakeBench
-
-```bash
-cp deepfakebench_adapters/adb_*_detector.py /path/to/deepfakebench/training/detectors/
-cp deepfakebench_adapters/configs/adb_*.yaml /path/to/deepfakebench/training/config/detector/
-```
-
-在 `/path/to/deepfakebench/training/detectors/__init__.py` 末尾新增：
-```python
-from .adb_visual_detector   import ADBVisualDetector
-from .adb_rppg_detector     import ADBRPPGDetector
-from .adb_sync_detector     import ADBSyncDetector
-from .adb_ensemble_detector import ADBEnsembleDetector
-```
-
-### 執行對齊評估
-
-```bash
-cd /path/to/deepfakebench
-
-# 各路評估
-python training/train.py \
-    --detector_path training/config/detector/adb_visual.yaml --phase test
-python training/train.py \
-    --detector_path training/config/detector/adb_rppg.yaml --phase test
-python training/train.py \
-    --detector_path training/config/detector/adb_sync.yaml --phase test
-
-# 集成（主要指標）
-python training/train.py \
-    --detector_path training/config/detector/adb_ensemble.yaml --phase test
-```
-
----
-
-## 訓練框架（驗證通過後啟用）
-
-### Stage 1：融合權重調優（~30 分鐘）
-
-凍結所有 backbone，只優化 3 個權重參數，在 FF++ val 上 grid search：
-
-```bash
-python scripts/train_fusion.py \
-    --config configs/training.yaml \
-    --stage weighted \
-    --scores_cache cache/scores.npz
-```
-
-### Stage 2：Meta-Classifier 訓練（~2-4 小時）
-
-2 層 MLP (3→512→256→2)，訓練在 FF++ + DFDC 混合資料集：
-
-```bash
-python scripts/train_fusion.py \
-    --config configs/training.yaml \
-    --stage meta \
-    --scores_cache cache/scores.npz
-```
-
-### 雙軌制資料集策略
-
-| Track | 資料集 | 目的 |
-|-------|--------|------|
-| **Track A**（基準對齊）| FF++ c23 only | 功能驗證 + SNR 校準 |
-| **Track B**（泛化訓練）| FF++ + DFDC + Celeb-DF v2 + ForgeryNet | 防止過擬合 FF++ 舊壓縮痕跡 |
-
-> Track B 的必要性：FF++ 涵蓋的偽造技術（2019年）已被現代擴散模型超越。
-> Meta-Classifier 必須在多樣化資料集上訓練才能應對真實世界高品質 deepfake。
-
----
-
-## 設定說明
-
-```yaml
-# configs/default.yaml 關鍵參數
-preprocessing:
-  insightface_model: "buffalo_sc"  # "buffalo_l" 提升精準度但更慢
-  use_face_cache: true             # 重複推理加速 2-3x
-  fps_target: 25.0
-
-detectors:
-  rppg:
-    snr_threshold: 1.5   # 執行 calibrate_snr.py 後更新
-    snr_scale: 1.0
-
-  sync:
-    whisper_device: "cpu"  # CPU 避免 VRAM 競爭
-
-fusion:
-  mode: "weighted"    # "meta" 啟用訓練後的 MLP 融合
-  weights:
-    visual: 0.50
-    rppg:   0.25
-    sync:   0.25
-```
-
----
-
-## 引用
+## 📚 引用與致謝
 
 ```bibtex
 @inproceedings{rossler2019faceforensics,
   title={FaceForensics++: Learning to Detect Manipulated Facial Images},
-  author={Rössler, Andreas and Cozzolino, Davide and Verdoliva, Luisa and Riess, Christian and Thies, Justus and Nießner, Matthias},
+  author={Rössler, Andreas et al.},
   booktitle={ICCV}, year={2019}
 }
 @inproceedings{liu2023rppgtoolbox,
   title={rPPG-Toolbox: Deep Remote PPG Toolbox},
-  author={Liu, Xin and Narayanswamy, Girish and Paruchuri, Akshay and Zhang, Xiaoyu and Tang, Jiankai and Zhang, Yuzhe and Sengupta, Roni and Patel, Shwetak and Wang, Yingcong and McDuff, Daniel},
+  author={Liu, Xin et al.},
   booktitle={NeurIPS}, year={2023}
 }
 @inproceedings{peng2025latentsync,
   title={LatentSync: Audio Conditioned Latent Diffusion Models for Lip Sync},
-  author={Peng, Chunyu and Xu, Yaofang and Ren, Fangyuan and Zhao, Shaobo and Zhang, Ying and others},
+  author={Peng, Chunyu et al.},
   booktitle={CVPR}, year={2025}
-}
-@inproceedings{yan2023deepfakebench,
-  title={DeepfakeBench: A Comprehensive Benchmark of Deepfake Detection},
-  author={Yan, Zhiyuan and Zhang, Yong and Fan, Xinhang and Wu, Baoyuan},
-  booktitle={NeurIPS}, year={2023}
 }
 ```
 
----
-
-## 授權
+## ⚖️ 授權協議
 
 MIT License
