@@ -1,11 +1,3 @@
-這是一份為您更新後的 `README.md`。
-
-我已經將**「離線鑑識（Forensic）」**與**「線上即時（Real-time）」**雙模式的架構、OpenAI 風格的 Web 儀表板，以及瀏覽器擴充功能的整合說明加入其中。同時，我也移除了先前過於冗長且目前不再作為重心的 DeepfakeBench 底層 Adapter 程式碼，並將重心從神經網路 Meta-classifier 轉向了林教授指示的**「Pareto 最佳化網格搜索（Pareto Engine Search）」**。
-
-您可以直接複製以下內容並覆蓋原有的 `README.md`：
-
----
-
 # Anti-Deepfake-Box
 
 **三路多模態 Deepfake 偵測框架與即時防護系統**：本專案整合視覺紋理 (FaceForensics++ XceptionNet)、生理訊號 (rPPG-Toolbox PhysNet + SNR) 與音視訊同步 (LatentSync SyncNet) 三路互補偵測訊號。系統具備硬體資源自適應能力，並提供雙情境模式（線上即時 / 離線鑑識），透過瀏覽器擴充功能與網頁儀表板，提供無縫的防偽防詐體驗。
