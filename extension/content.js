@@ -6,6 +6,15 @@ const SESSION_ID = 'ext_' + Math.random().toString(36).slice(2, 9);
 let active = false;
 let intervalId = null;
 let overlay = null;
+let currentMode = 'online';   // kept in sync with chrome.storage
+
+// Load saved mode; update whenever the user changes it in the popup
+chrome.storage.local.get(['adbMode'], result => {
+  currentMode = result.adbMode || 'online';
+});
+chrome.storage.onChanged.addListener(changes => {
+  if (changes.adbMode) currentMode = changes.adbMode.newValue;
+});
 
 function getLargestVideo() {
   const videos = Array.from(document.querySelectorAll('video'));
@@ -21,14 +30,13 @@ function createOverlay(video) {
   Object.assign(el.style, {
     position: 'absolute', top: '8px', left: '8px', zIndex: 99999,
     background: 'rgba(0,0,0,0.72)', color: '#fff',
-    fontFamily: 'monospace', fontSize: '12px',
-    padding: '6px 10px', borderRadius: '6px',
+    fontFamily: '"Inter", system-ui, monospace', fontSize: '12px',
+    padding: '6px 10px', borderRadius: '8px',
     pointerEvents: 'none', transition: 'border 0.3s',
-    border: '2px solid #888', minWidth: '140px',
+    border: '2px solid #888', minWidth: '150px',
   });
   el.innerHTML = '<b>ADB</b> — waiting...';
 
-  // Position relative to video
   const wrapper = document.createElement('div');
   Object.assign(wrapper.style, { position: 'relative', display: 'inline-block' });
   video.parentNode.insertBefore(wrapper, video);
@@ -39,9 +47,9 @@ function createOverlay(video) {
 
 function scoreToColor(score, confidence) {
   if (confidence === 'low') return '#888';
-  if (score > 0.65) return '#e55';   // red = fake
-  if (score > 0.45) return '#fa0';   // yellow = uncertain
-  return '#4c4';                      // green = real
+  if (score > 0.65) return '#dc2626';   // red = fake
+  if (score > 0.45) return '#d97706';   // amber = uncertain
+  return '#16a34a';                      // green = real
 }
 
 function updateOverlay(data) {
@@ -50,14 +58,16 @@ function updateOverlay(data) {
   const pct = Math.round(s * 100);
   const color = scoreToColor(s, data.confidence);
   const label = s > 0.5 ? 'FAKE' : 'REAL';
+  const threshold = data.threshold != null ? Math.round(data.threshold * 100) : 50;
+  const modeIcon = data.mode === 'offline' ? '🔬' : '⚡';
   overlay.style.border = `2px solid ${color}`;
   overlay.innerHTML = `
-    <b style="color:${color}">ADB: ${label}</b> ${pct}%<br>
+    <b style="color:${color}">${modeIcon} ${label}</b> ${pct}%<br>
     <span style="color:#aaa;font-size:10px">
       vis:${fmt(data.modality_scores?.visual)}
       rppg:${fmt(data.modality_scores?.rppg)}
       fft:${fmt(data.modality_scores?.fft)}<br>
-      ${data.fps}fps · ${data.latency_ms}ms · ${data.confidence}
+      ${data.fps}fps · ${data.latency_ms}ms · thr:${threshold}% · ${data.confidence}
     </span>`;
 }
 
@@ -66,7 +76,7 @@ function fmt(v) { return v != null ? (v * 100).toFixed(0) + '%' : 'N/A'; }
 function captureAndSend(video) {
   if (!video || video.readyState < 2) return;
   const canvas = document.createElement('canvas');
-  canvas.width = Math.min(video.videoWidth, 640);
+  canvas.width  = Math.min(video.videoWidth,  640);
   canvas.height = Math.min(video.videoHeight, 360);
   canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
   const b64 = canvas.toDataURL('image/jpeg', 0.82).split(',')[1];
@@ -74,7 +84,7 @@ function captureAndSend(video) {
   fetch(`${SERVER}/detect/frame`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image: b64, session_id: SESSION_ID }),
+    body: JSON.stringify({ image: b64, session_id: SESSION_ID, mode: currentMode }),
   })
   .then(r => r.json())
   .then(data => updateOverlay(data))

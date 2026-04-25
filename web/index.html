@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anti-Deepfake Box</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/web/styles.css">
+</head>
+<body>
+
+<div class="page">
+
+  <!-- Topbar -->
+  <header class="topbar">
+    <div class="logo">
+      <div class="logo-icon">A</div>
+      Anti-Deepfake Box
+    </div>
+    <button class="theme-btn" id="theme-btn" title="Toggle dark mode">Dark</button>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero">
+    <h1>Detect AI-generated video in real time</h1>
+    <p>Multi-modal analysis across visual artifacts, physiological signals, and audio-visual sync. Screen capture — no upload needed.</p>
+  </section>
+
+  <!-- Detection Mode -->
+  <section class="mode-section">
+    <div class="section-label">Detection Mode</div>
+    <div class="mode-grid" id="mode-grid">
+
+      <div class="mode-card" data-mode="online" data-selected="true" role="radio" tabindex="0">
+        <div class="mode-card-icon">⚡</div>
+        <div class="mode-card-title">Real-time Detection</div>
+        <div class="mode-card-desc">Speed-optimised for everyday use — mobile, messaging apps, and live streams. Sub-second latency.</div>
+        <div class="mode-card-meta">
+          <span class="tag accent">Threshold 50%</span>
+          <span class="tag">Visual</span>
+          <span class="tag">rPPG</span>
+          <span class="tag">FFT</span>
+        </div>
+      </div>
+
+      <div class="mode-card" data-mode="offline" data-selected="false" role="radio" tabindex="0">
+        <div class="mode-card-icon">🔬</div>
+        <div class="mode-card-title">Forensic Analysis</div>
+        <div class="mode-card-desc">Maximum accuracy for law enforcement and forensic analysts. All four modalities active; no resource limits.</div>
+        <div class="mode-card-meta">
+          <span class="tag accent">Threshold 40%</span>
+          <span class="tag">Visual</span>
+          <span class="tag">rPPG</span>
+          <span class="tag">Sync</span>
+          <span class="tag">FFT</span>
+        </div>
+      </div>
+
+    </div>
+
+    <p id="mode-status" style="margin-top:12px; font-size:13px; color:var(--text-faint);">
+      Mode set to <b id="mode-name">Real-time Detection</b>
+    </p>
+  </section>
+
+  <!-- Extension hint -->
+  <div class="ext-hint">
+    <div class="ext-hint-icon">🧩</div>
+    <div class="ext-hint-body">
+      <strong>Enable the browser extension to start detection</strong>
+      <p>
+        The extension captures frames directly from any video playing in your browser — no file upload required.
+        Enable it from the extension popup, then open any video to see live results below.
+      </p>
+    </div>
+  </div>
+
+  <!-- Live results -->
+  <section class="live-section">
+    <div class="section-label">Live Results</div>
+    <div id="live-empty">No active detection session. Enable the browser extension on a video page.</div>
+    <div id="sessions-container"></div>
+  </section>
+
+</div><!-- .page -->
+
+<script src="/web/app.js"></script>
+</body>
+</html>

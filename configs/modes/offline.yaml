@@ -1,0 +1,39 @@
+# Offline / Forensic Mode
+# Intended for law enforcement and forensic analysts.
+# Maximises detection accuracy; computational cost is not a constraint.
+
+mode_name: "offline"
+mode_label: "Forensic Analysis"
+mode_description: >
+  All four detection modalities active. Uses a stricter decision threshold (0.40)
+  so the system errs on the side of flagging suspicious content. Optimised for
+  accuracy, not speed.
+
+preprocessing:
+  insightface_model: "buffalo_l"   # Higher-accuracy face detector
+  insightface_batch_size: 32
+  fps_target: 25.0
+
+detectors:
+  visual:
+    enabled: true
+    max_frames: 32
+    batch_size: 8
+  rppg:
+    enabled: true
+    snr_threshold: 1.2   # Stricter SNR → higher rPPG sensitivity
+  sync:
+    enabled: true
+    whisper_model: "small"   # More accurate transcript for lip-sync check
+    whisper_device: "cpu"
+  fft:
+    enabled: true
+    fft_max_frames: 16
+    weight: 0.05
+
+fusion:
+  threshold: 0.40   # Strict: flag if score ≥ 40 %
+  weights:
+    visual: 0.50
+    rppg:   0.20
+    sync:   0.25

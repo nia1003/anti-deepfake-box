@@ -3,34 +3,213 @@
 <head>
 <meta charset="utf-8">
 <style>
-  body { width:200px; padding:12px; font-family:monospace; font-size:13px; }
-  button { width:100%; padding:8px; margin-top:8px; cursor:pointer;
-           border:none; border-radius:4px; font-size:13px; }
-  #toggle { background:#3a7; color:#fff; }
-  #toggle.off { background:#e55; }
-  .label { color:#555; font-size:11px; margin-top:8px; }
+  :root {
+    --accent: #1a56db;
+    --real:   #16a34a;
+    --fake:   #dc2626;
+    --border: #e5e5e5;
+    --bg:     #ffffff;
+    --text:   #0d0d0d;
+    --muted:  #6b6b6b;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    width: 240px;
+    padding: 16px;
+    font-family: "Inter", system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--bg);
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .logo-icon {
+    width: 22px; height: 22px;
+    background: var(--accent);
+    border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 11px; font-weight: 700; flex-shrink: 0;
+  }
+  .header-text b { font-size: 13px; display: block; }
+  .header-text span { font-size: 11px; color: var(--muted); }
+
+  /* Divider */
+  hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+
+  /* Main toggle */
+  #toggle {
+    width: 100%;
+    padding: 9px;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--accent);
+    color: #fff;
+    transition: background .15s;
+    letter-spacing: -.1px;
+  }
+  #toggle.off { background: var(--fake); }
+  #toggle:hover { filter: brightness(1.08); }
+
+  /* Mode section */
+  .mode-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  .mode-pills {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .pill {
+    border: 1.5px solid var(--border);
+    border-radius: 7px;
+    padding: 7px 8px;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+    text-align: center;
+    user-select: none;
+  }
+  .pill:hover { border-color: var(--accent); }
+  .pill[data-selected="true"] {
+    border-color: var(--accent);
+    background: rgba(26,86,219,.08);
+  }
+  .pill-icon { font-size: 15px; display: block; margin-bottom: 2px; }
+  .pill-name { font-weight: 600; font-size: 11px; }
+  .pill-sub  { font-size: 10px; color: var(--muted); margin-top: 1px; }
+
+  /* Server status */
+  .status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 10px;
+  }
+  .dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    margin-right: 4px;
+    background: #ccc;
+  }
+  .dot.online  { background: var(--real); }
+  .dot.offline { background: var(--fake); }
+
+  /* Dashboard link */
+  .dash-link {
+    display: block;
+    text-align: center;
+    font-size: 11px;
+    color: var(--accent);
+    text-decoration: none;
+    margin-top: 8px;
+  }
+  .dash-link:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
-  <b>Anti-Deepfake-Box</b>
-  <p class="label">Real-time deepfake detection</p>
-  <button id="toggle">Enable Detection</button>
-  <p class="label">Server: <span id="srv">checking...</span></p>
-  <script>
-    let enabled = false;
-    const btn = document.getElementById('toggle');
-    btn.onclick = () => {
-      enabled = !enabled;
-      btn.textContent = enabled ? 'Disable Detection' : 'Enable Detection';
-      btn.classList.toggle('off', enabled);
-      chrome.tabs.query({active:true,currentWindow:true}, tabs =>
-        chrome.tabs.sendMessage(tabs[0].id, {action:'toggle'})
-      );
-    };
-    fetch('http://localhost:8000/health')
-      .then(r => r.json())
-      .then(() => { document.getElementById('srv').textContent = 'online ✓'; })
-      .catch(() => { document.getElementById('srv').textContent = 'offline ✗'; });
-  </script>
+
+<div class="header">
+  <div class="logo-icon">A</div>
+  <div class="header-text">
+    <b>Anti-Deepfake Box</b>
+    <span>Real-time detection</span>
+  </div>
+</div>
+
+<button id="toggle">Enable Detection</button>
+
+<hr>
+
+<div class="mode-label">Detection Mode</div>
+<div class="mode-pills">
+
+  <div class="pill" data-mode="online" data-selected="true" tabindex="0">
+    <span class="pill-icon">⚡</span>
+    <div class="pill-name">Real-time</div>
+    <div class="pill-sub">Fast · 50% threshold</div>
+  </div>
+
+  <div class="pill" data-mode="offline" data-selected="false" tabindex="0">
+    <span class="pill-icon">🔬</span>
+    <div class="pill-name">Forensic</div>
+    <div class="pill-sub">Accurate · 40% threshold</div>
+  </div>
+
+</div>
+
+<div class="status-row">
+  <span><span class="dot" id="srv-dot"></span><span id="srv-text">checking…</span></span>
+</div>
+
+<a class="dash-link" href="http://localhost:8000/" target="_blank">Open dashboard ↗</a>
+
+<script>
+  const SERVER = 'http://localhost:8000';
+  let enabled = false;
+
+  // ── Toggle detection ──────────────────────────────────────────────
+  const btn = document.getElementById('toggle');
+  btn.onclick = () => {
+    enabled = !enabled;
+    btn.textContent = enabled ? 'Disable Detection' : 'Enable Detection';
+    btn.classList.toggle('off', enabled);
+    chrome.tabs.query({ active: true, currentWindow: true }, tabs =>
+      chrome.tabs.sendMessage(tabs[0].id, { action: 'toggle' })
+    );
+  };
+
+  // ── Mode pills ────────────────────────────────────────────────────
+  const pills = document.querySelectorAll('.pill');
+
+  function selectMode(mode) {
+    pills.forEach(p => p.setAttribute('data-selected', p.dataset.mode === mode ? 'true' : 'false'));
+    chrome.storage.local.set({ adbMode: mode });
+    fetch(`${SERVER}/mode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    }).catch(() => {});
+  }
+
+  // Restore saved mode on popup open
+  chrome.storage.local.get(['adbMode'], result => {
+    selectMode(result.adbMode || 'online');
+  });
+
+  pills.forEach(pill => {
+    pill.addEventListener('click', () => selectMode(pill.dataset.mode));
+    pill.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectMode(pill.dataset.mode); }
+    });
+  });
+
+  // ── Server health ─────────────────────────────────────────────────
+  const dot  = document.getElementById('srv-dot');
+  const srvT = document.getElementById('srv-text');
+  fetch(`${SERVER}/health`)
+    .then(r => r.json())
+    .then(() => { dot.className = 'dot online';  srvT.textContent = 'Server online';  })
+    .catch(() => { dot.className = 'dot offline'; srvT.textContent = 'Server offline'; });
+</script>
 </body>
 </html>

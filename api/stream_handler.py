@@ -112,3 +112,10 @@ class SessionManager:
 
     def active_count(self) -> int:
         return len(self._sessions)
+
+    def all_states(self) -> dict:
+        """Return a snapshot of all active session states for dashboard polling."""
+        return {
+            sid: state.to_response()
+            for sid, state in self._sessions.items()
+        }

@@ -1,0 +1,36 @@
+# Online / Real-time Mode
+# Intended for general users on mobile devices or messaging apps.
+# Optimised for speed and low resource usage; sync detector is disabled.
+
+mode_name: "online"
+mode_label: "Real-time Detection"
+mode_description: >
+  Lightweight pipeline skipping the audio-visual sync detector. Uses fewer
+  sampled frames and a faster face detector. Decision threshold is 0.50
+  (balanced sensitivity vs. specificity). Targets sub-second latency.
+
+preprocessing:
+  insightface_model: "buffalo_sc"   # Faster face detector
+  insightface_batch_size: 16
+  fps_target: 15.0
+
+detectors:
+  visual:
+    enabled: true
+    max_frames: 8    # Far fewer frames → faster inference
+    batch_size: 4
+  rppg:
+    enabled: true
+    snr_threshold: 1.5
+  sync:
+    enabled: false   # Skip — too slow for real-time use
+  fft:
+    enabled: true
+    fft_max_frames: 8
+    weight: 0.20
+
+fusion:
+  threshold: 0.50
+  weights:
+    visual: 0.55
+    rppg:   0.25
