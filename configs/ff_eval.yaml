@@ -19,7 +19,8 @@ detectors:
     batch_size: 16
     device: "cuda"
   rppg:
-    pretrained: "checkpoints/physnet_ubfc.pth"
+    # pretrained: not used — RPPGDetector runs POS (Wang 2017), a pure
+    # NumPy/SciPy algorithm that requires no checkpoint.
     snr_threshold: 1.5    # will be updated after calibrate_snr.py
     snr_scale: 1.0
     device: "cuda"
