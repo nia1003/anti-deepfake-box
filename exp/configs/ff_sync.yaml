@@ -1,0 +1,27 @@
+# Sync (audio-visual) evaluation on FaceForensics++
+# NOTE: FF++ videos must have an audio track for this detector to produce scores.
+# Silent videos → None score → filtered from metrics.
+
+device: "cpu"
+
+dataset:
+  type: "ff++"
+  compression: "c23"
+  split: "test"
+  manipulation_types:
+    - Deepfakes
+    - Face2Face
+    - FaceSwap
+    - NeuralTextures
+
+detectors:
+  sync:
+    syncnet_path: "checkpoints/latentsync_syncnet.pth"
+    whisper_model: "tiny"
+    whisper_device: "cpu"
+    device: "cpu"
+
+exp:
+  active_detectors: ["sync"]
+  name: "ff_sync"
+  output: "exp/results/ff_sync.json"

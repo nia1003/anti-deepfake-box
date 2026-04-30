@@ -1,0 +1,32 @@
+# Sync (audio-visual) evaluation on DeepFakeBench multi-dataset suite.
+
+device: "cpu"
+
+dataset:
+  type: "deepfakebench"
+  sub_datasets:
+    - name: "ff++"
+      compression: "c23"
+      split: "test"
+      manipulation_types:
+        - Deepfakes
+        - Face2Face
+        - FaceSwap
+        - NeuralTextures
+    - name: "celebdf"
+      version: "v2"
+      split: "test"
+    - name: "dfdc"
+      split: "train"
+
+detectors:
+  sync:
+    syncnet_path: "checkpoints/latentsync_syncnet.pth"
+    whisper_model: "tiny"
+    whisper_device: "cpu"
+    device: "cpu"
+
+exp:
+  active_detectors: ["sync"]
+  name: "dfb_sync"
+  output: "exp/results/dfb_sync.json"
