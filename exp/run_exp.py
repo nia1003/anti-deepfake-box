@@ -49,6 +49,7 @@ EXP = Path(__file__).parent
 if str(EXP) not in sys.path:
     sys.path.insert(0, str(EXP))
 
+from exp.utils.device import get_device, describe_backends
 from preprocessing import UnifiedFaceExtractor, AudioExtractor
 from detectors.visual_detector import VisualDetector
 from detectors.sync_detector import SyncDetector
@@ -142,19 +143,19 @@ def _build_dfdc_samples(
 
 def _build_visual_detector(cfg: dict) -> VisualDetector:
     vcfg = cfg.get("detectors", {}).get("visual", {})
-    vcfg.setdefault("device", cfg.get("device", "cpu"))
+    vcfg.setdefault("device", get_device(cfg.get("device", "auto")))
     return VisualDetector(vcfg)
 
 
 def _build_tscan_detector(cfg: dict) -> TSCANDetector:
     tcfg = cfg.get("detectors", {}).get("tscan", {})
-    tcfg.setdefault("device", cfg.get("device", "cpu"))
+    tcfg.setdefault("device", cfg.get("device", "auto"))  # TSCANDetector resolves "auto"
     return TSCANDetector(tcfg)
 
 
 def _build_sync_detector(cfg: dict) -> SyncDetector:
     scfg = cfg.get("detectors", {}).get("sync", {})
-    scfg.setdefault("device", cfg.get("device", "cpu"))
+    scfg.setdefault("device", get_device(cfg.get("device", "auto")))
     return SyncDetector(scfg)
 
 
@@ -304,7 +305,15 @@ def parse_args() -> argparse.Namespace:
     # Run control
     p.add_argument("--max_videos", type=int, default=None,
                    help="Max videos per (detector, dataset) pair")
-    p.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
+    p.add_argument(
+        "--device",
+        default="auto",
+        choices=["auto", "cpu", "cuda", "mps"],
+        help=(
+            "Compute device. 'auto' → cuda > mps (Apple Silicon) > cpu. "
+            "'mps' runs PyTorch on Metal; rPPG signal ops use MLX when installed."
+        ),
+    )
     p.add_argument("--config", default="", help="Optional YAML config override")
 
     # Output
@@ -354,11 +363,16 @@ def _dataset_specs(args: argparse.Namespace):
 def main() -> None:
     args = parse_args()
 
+    # Report available compute backends
+    print("── Compute backends ──────────────────────")
+    print(describe_backends())
+    print("──────────────────────────────────────────\n")
+
     # Build config
     cfg = _default_config()
     if args.config and Path(args.config).exists():
         cfg = _merge(cfg, _load_yaml(args.config))
-    cfg["device"] = args.device
+    cfg["device"] = args.device   # "auto" | "cuda" | "mps" | "cpu"
 
     detectors = _detector_names(args)
     dataset_iter = list(_dataset_specs(args))

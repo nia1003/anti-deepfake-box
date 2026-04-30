@@ -1,7 +1,7 @@
 # XceptionNet evaluation on FaceForensics++
 # Inherits from base.yaml; only visual detector is active.
 
-device: "cpu"
+device: "auto"
 
 dataset:
   type: "ff++"
@@ -18,7 +18,7 @@ detectors:
     pretrained: "checkpoints/xception_ff_c23.pth"
     visual_max_frames: 32
     visual_batch_size: 8
-    device: "cpu"
+    device: "auto"
 
 exp:
   active_detectors: ["visual"]

@@ -1,7 +1,7 @@
 # TS-CAN (rPPG) evaluation on FaceForensics++
 # Uses neural TS-CAN if checkpoint present; falls back to POS automatically.
 
-device: "cpu"
+device: "auto"
 
 dataset:
   type: "ff++"
@@ -20,7 +20,7 @@ detectors:
     tscan_img_size: 36
     snr_threshold: 1.5
     snr_scale: 1.0
-    device: "cpu"
+    device: "auto"
 
 exp:
   active_detectors: ["tscan"]

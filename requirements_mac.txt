@@ -1,0 +1,29 @@
+# Mac (Apple Silicon) 環境依賴
+# 安裝順序：
+#   pip install -r requirements_mac.txt
+#
+# 需求：
+#   - macOS 13+ (Ventura 以上)
+#   - Apple Silicon (M1 / M2 / M3)
+#   - Python 3.10+
+
+# ── 基礎依賴（從 requirements.txt 繼承）──────────────────────────────────────
+-r requirements.txt
+
+# ── PyTorch MPS 後端（Metal Performance Shaders）────────────────────────────
+# requirements.txt 已安裝 torch>=2.1.0，MPS 支援內建，無需額外套件。
+# 驗證 MPS 可用性：
+#   python -c "import torch; print(torch.backends.mps.is_available())"
+
+# ── Apple MLX（Metal GPU 加速的陣列運算）────────────────────────────────────
+# 用於 TS-CAN / POS rPPG 訊號處理，在 Metal GPU 上執行矩陣運算。
+# 僅支援 Apple Silicon（M1 / M2 / M3）。
+mlx>=0.16.0
+
+# ── InsightFace on Mac（ONNX CPU 後端）───────────────────────────────────────
+# Mac 使用 onnxruntime（CPU），不用 onnxruntime-gpu。
+# requirements.txt 已包含 onnxruntime>=1.16.0，此處無需重複。
+
+# ── Whisper on Mac───────────────────────────────────────────────────────────
+# openai-whisper 在 Mac 上以 CPU 執行（MPS 支援有限）。
+# 已在 requirements.txt 包含。

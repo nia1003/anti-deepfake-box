@@ -2,7 +2,7 @@
 # NOTE: FF++ videos must have an audio track for this detector to produce scores.
 # Silent videos → None score → filtered from metrics.
 
-device: "cpu"
+device: "auto"
 
 dataset:
   type: "ff++"
@@ -18,8 +18,8 @@ detectors:
   sync:
     syncnet_path: "checkpoints/latentsync_syncnet.pth"
     whisper_model: "tiny"
-    whisper_device: "cpu"
-    device: "cpu"
+    whisper_device: "auto"
+    device: "auto"
 
 exp:
   active_detectors: ["sync"]

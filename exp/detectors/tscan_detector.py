@@ -11,8 +11,12 @@ Pipeline:
   4. Average predicted rPPG signal across windows
   5. Compute SNR; map to fake score (same as POS-based RPPGDetector)
 
-Fallback: if checkpoint absent or import fails, degrades to POS algorithm
-(identical to the project's existing RPPGDetector).
+Device strategy (Mac / Apple Silicon):
+  - PyTorch neural-net inference  → MPS  (Metal Performance Shaders)
+  - rPPG signal processing (POS)  → MLX  (Apple MLX, Metal GPU)
+  - Fallback when neither present → CPU
+
+Fallback chain: TS-CAN checkpoint → POS via MLX → POS via NumPy
 """
 
 from __future__ import annotations
@@ -25,11 +29,15 @@ from typing import Optional
 import numpy as np
 
 ROOT = Path(__file__).parent.parent.parent
+EXP = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+if str(EXP) not in sys.path:
+    sys.path.insert(0, str(EXP))
 
 from detectors.base_detector import BaseDetector
-from detectors.rppg_detector import _pos_wang, compute_ppg_snr, snr_to_fake_score
+from detectors.rppg_detector import compute_ppg_snr, snr_to_fake_score
+from exp.utils.mlx_pos import pos_wang as _pos_wang_mlx   # MLX-accelerated POS
 from preprocessing.face_extractor import FaceTrack
 
 try:
@@ -218,13 +226,23 @@ class TSCANDetector(BaseDetector):
     """
     TS-CAN rPPG detector for deepfake identification.
 
-    If checkpoint is available and torch is installed, uses the neural TS-CAN
-    model to estimate the rPPG signal. Otherwise falls back to the POS
-    algorithm (Wang 2017), producing equivalent SNR-based fake scores.
+    Compute backend selection:
+      - Neural TS-CAN on MPS / CUDA / CPU (PyTorch)  — when checkpoint present
+      - POS algorithm on MLX (Metal GPU)              — Apple Silicon fallback
+      - POS algorithm on NumPy                        — universal fallback
+
+    The ``device`` config key accepts: "auto", "cuda", "mps", "cpu".
+    "auto" resolves to cuda > mps > cpu at runtime.
     """
 
     def __init__(self, config: dict):
         super().__init__(config)
+        # Resolve "auto" device at construction time
+        from exp.utils.device import get_device
+        resolved = get_device(config.get("device", "auto"))
+        self.device = resolved
+        config["device"] = resolved           # propagate to BaseDetector
+
         self.pretrained: str = config.get("pretrained", "")
         self.frame_depth: int = int(config.get("tscan_frame_depth", 20))
         self.img_size: int = int(config.get("tscan_img_size", 36))
@@ -235,14 +253,15 @@ class TSCANDetector(BaseDetector):
 
     def load(self) -> None:
         if not _TORCH_OK:
-            return  # fall back to POS
+            return  # fall back to MLX/POS
 
         ckpt_path = Path(self.pretrained)
         if not ckpt_path.exists():
-            return  # fall back to POS
+            return  # fall back to MLX/POS
 
         try:
             model = TSCAN(frame_depth=self.frame_depth, img_size=self.img_size)
+            # Always load weights to CPU first; move to target device after
             state = torch.load(ckpt_path, map_location="cpu")
             if isinstance(state, dict) and "model_state_dict" in state:
                 state = state["model_state_dict"]
@@ -252,21 +271,22 @@ class TSCANDetector(BaseDetector):
             model.eval()
             self._model = model.to(self.device)
             self._use_tscan = True
+            print(f"[TSCANDetector] Loaded checkpoint on {self.device.upper()}")
         except Exception as exc:
-            print(f"[TSCANDetector] Failed to load checkpoint ({exc}); using POS fallback.")
+            print(f"[TSCANDetector] Checkpoint load failed ({exc}); using POS fallback.")
 
     # ------------------------------------------------------------------
     # rPPG estimation
     # ------------------------------------------------------------------
 
     def _estimate_rppg_tscan(self, face_track: FaceTrack) -> np.ndarray:
-        """Use TS-CAN neural model to estimate rPPG signal."""
+        """TS-CAN neural inference (MPS / CUDA / CPU via PyTorch)."""
         frames = _resize_crops(face_track.crops_128, self.img_size)
         return _tscan_predict(self._model, frames, self.frame_depth, self.device)
 
     def _estimate_rppg_pos(self, face_track: FaceTrack) -> np.ndarray:
-        """Fall back to POS algorithm (Wang 2017)."""
-        return _pos_wang(face_track.crops_128, fps=face_track.fps)
+        """POS algorithm: dispatches to MLX (Metal) on Apple Silicon, NumPy elsewhere."""
+        return _pos_wang_mlx(face_track.crops_128, fps=face_track.fps)
 
     # ------------------------------------------------------------------
     # BaseDetector interface
@@ -285,11 +305,10 @@ class TSCANDetector(BaseDetector):
             method = "TS-CAN"
         else:
             bvp = self._estimate_rppg_pos(face_track)
-            method = "POS"
+            method = "POS+MLX" if _mlx_available() else "POS"
 
         snr = compute_ppg_snr(bvp, fps=face_track.fps)
-        score = snr_to_fake_score(snr, self.snr_threshold, self.snr_scale)
-        return score
+        return snr_to_fake_score(snr, self.snr_threshold, self.snr_scale)
 
     def get_ppg_and_snr(self, face_track: FaceTrack) -> dict:
         """Debug helper: return BVP waveform, SNR, and fake score."""
@@ -299,10 +318,10 @@ class TSCANDetector(BaseDetector):
 
         if self._use_tscan:
             bvp = self._estimate_rppg_tscan(face_track)
-            method = "TS-CAN"
+            method = f"TS-CAN ({self.device})"
         else:
             bvp = self._estimate_rppg_pos(face_track)
-            method = "POS"
+            method = "POS+MLX" if _mlx_available() else "POS"
 
         snr = compute_ppg_snr(bvp, fps=face_track.fps)
         return {
@@ -312,3 +331,11 @@ class TSCANDetector(BaseDetector):
             "method": method,
             "num_frames": face_track.T,
         }
+
+
+def _mlx_available() -> bool:
+    try:
+        import mlx.core  # noqa: F401
+        return True
+    except ImportError:
+        return False

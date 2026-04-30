@@ -1,6 +1,6 @@
 # TS-CAN (rPPG) evaluation on DeepFakeBench multi-dataset suite.
 
-device: "cpu"
+device: "auto"
 
 dataset:
   type: "deepfakebench"
@@ -26,7 +26,7 @@ detectors:
     tscan_img_size: 36
     snr_threshold: 1.5
     snr_scale: 1.0
-    device: "cpu"
+    device: "auto"
 
 exp:
   active_detectors: ["tscan"]

@@ -1,7 +1,7 @@
 # Base experiment config — inherited by all per-detector configs.
 # Override any value in the child YAML.
 
-device: "cpu"   # change to "cuda" if GPU available
+device: "auto"  # auto → cuda > mps (Apple Silicon) > cpu
 
 preprocessing:
   fps_target: 25.0
@@ -17,19 +17,19 @@ detectors:
     pretrained: ""                        # path/to/xception_ff_c23.pth
     visual_max_frames: 32
     visual_batch_size: 8
-    device: "cpu"
+    device: "auto"
   tscan:
     pretrained: ""                        # path/to/tscan_ubfc.pth (optional)
     tscan_frame_depth: 20                 # frames per TS-CAN window
     tscan_img_size: 36                    # spatial crop fed into TS-CAN
     snr_threshold: 1.5
     snr_scale: 1.0
-    device: "cpu"
+    device: "auto"                        # MPS on Mac; POS falls back to MLX
   sync:
     syncnet_path: ""                      # path/to/latentsync_syncnet.pth
     whisper_model: "tiny"
-    whisper_device: "cpu"
-    device: "cpu"
+    whisper_device: "cpu"                 # Whisper stays on CPU (MPS limited support)
+    device: "auto"
 
 fusion:
   mode: "weighted"
