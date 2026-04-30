@@ -1,0 +1,26 @@
+# XceptionNet evaluation on FaceForensics++
+# Inherits from base.yaml; only visual detector is active.
+
+device: "cpu"
+
+dataset:
+  type: "ff++"
+  compression: "c23"
+  split: "test"
+  manipulation_types:
+    - Deepfakes
+    - Face2Face
+    - FaceSwap
+    - NeuralTextures
+
+detectors:
+  visual:
+    pretrained: "checkpoints/xception_ff_c23.pth"
+    visual_max_frames: 32
+    visual_batch_size: 8
+    device: "cpu"
+
+exp:
+  active_detectors: ["visual"]
+  name: "ff_xception"
+  output: "exp/results/ff_xception.json"

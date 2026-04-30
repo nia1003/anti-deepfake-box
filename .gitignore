@@ -46,6 +46,8 @@ checkpoints/*.onnx
 # Results (generated outputs)
 results/*.json
 results/*.csv
+exp/results/*.json
+exp/results/*.csv
 cache/
 
 # Audio temp files

@@ -1,0 +1,40 @@
+# Base experiment config — inherited by all per-detector configs.
+# Override any value in the child YAML.
+
+device: "cpu"   # change to "cuda" if GPU available
+
+preprocessing:
+  fps_target: 25.0
+  insightface_model: "buffalo_sc"
+  insightface_batch_size: 16
+  face_cache_dir: ".face_cache"
+  use_face_cache: true
+  sample_rate: 16000
+  channels: 1
+
+detectors:
+  visual:
+    pretrained: ""                        # path/to/xception_ff_c23.pth
+    visual_max_frames: 32
+    visual_batch_size: 8
+    device: "cpu"
+  tscan:
+    pretrained: ""                        # path/to/tscan_ubfc.pth (optional)
+    tscan_frame_depth: 20                 # frames per TS-CAN window
+    tscan_img_size: 36                    # spatial crop fed into TS-CAN
+    snr_threshold: 1.5
+    snr_scale: 1.0
+    device: "cpu"
+  sync:
+    syncnet_path: ""                      # path/to/latentsync_syncnet.pth
+    whisper_model: "tiny"
+    whisper_device: "cpu"
+    device: "cpu"
+
+fusion:
+  mode: "weighted"
+  threshold: 0.50
+  weights:
+    visual: 0.50
+    rppg: 0.25
+    sync: 0.25

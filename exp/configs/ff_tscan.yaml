@@ -1,0 +1,28 @@
+# TS-CAN (rPPG) evaluation on FaceForensics++
+# Uses neural TS-CAN if checkpoint present; falls back to POS automatically.
+
+device: "cpu"
+
+dataset:
+  type: "ff++"
+  compression: "c23"
+  split: "test"
+  manipulation_types:
+    - Deepfakes
+    - Face2Face
+    - FaceSwap
+    - NeuralTextures
+
+detectors:
+  tscan:
+    pretrained: "checkpoints/tscan_ubfc.pth"  # optional; POS used if absent
+    tscan_frame_depth: 20
+    tscan_img_size: 36
+    snr_threshold: 1.5
+    snr_scale: 1.0
+    device: "cpu"
+
+exp:
+  active_detectors: ["tscan"]
+  name: "ff_tscan"
+  output: "exp/results/ff_tscan.json"

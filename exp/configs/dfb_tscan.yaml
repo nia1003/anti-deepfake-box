@@ -1,0 +1,34 @@
+# TS-CAN (rPPG) evaluation on DeepFakeBench multi-dataset suite.
+
+device: "cpu"
+
+dataset:
+  type: "deepfakebench"
+  sub_datasets:
+    - name: "ff++"
+      compression: "c23"
+      split: "test"
+      manipulation_types:
+        - Deepfakes
+        - Face2Face
+        - FaceSwap
+        - NeuralTextures
+    - name: "celebdf"
+      version: "v2"
+      split: "test"
+    - name: "dfdc"
+      split: "train"
+
+detectors:
+  tscan:
+    pretrained: "checkpoints/tscan_ubfc.pth"
+    tscan_frame_depth: 20
+    tscan_img_size: 36
+    snr_threshold: 1.5
+    snr_scale: 1.0
+    device: "cpu"
+
+exp:
+  active_detectors: ["tscan"]
+  name: "dfb_tscan"
+  output: "exp/results/dfb_tscan.json"
