@@ -104,6 +104,7 @@ def score_videos(
     syncnet_path: str = "",
     whisper_model: str = "tiny",
     label_map: Optional[Dict[str, str]] = None,
+    skip_leading_ms: int = 0,
 ) -> List[Dict]:
     """
     Run SyncDetector on each video and return rows for CSV output.
@@ -120,7 +121,8 @@ def score_videos(
     }
     face_cfg = {"device": device, "use_face_cache": True}
 
-    audio_ext = AudioExtractor({"sample_rate": 16000, "channels": 1})
+    audio_ext = AudioExtractor({"sample_rate": 16000, "channels": 1,
+                                "skip_leading_ms": skip_leading_ms})
     face_ext = UnifiedFaceExtractor(face_cfg)
     detector = SyncDetector(detector_cfg)
 
@@ -215,11 +217,23 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--whisper_model", default="tiny",
                    choices=["tiny", "base", "small", "medium", "large"],
                    help="Whisper model size (tiny is fastest; default: tiny)")
+    p.add_argument("--mode", choices=["forensic", "realtime"], default="realtime",
+                   help=(
+                       "forensic  — skip leading 80ms silence, whisper=small (accurate)\n"
+                       "realtime  — no silence skip, whisper=tiny (fast) [default]"
+                   ))
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+
+    # Mode overrides: forensic → skip silence + larger whisper
+    skip_ms = 80 if args.mode == "forensic" else 0
+    whisper = args.whisper_model
+    if args.mode == "forensic" and whisper == "tiny":
+        whisper = "small"
+    print(f"[mode={args.mode}]  skip_leading_ms={skip_ms}  whisper={whisper}")
 
     videos = _collect_videos(args.input_dir, args.video_list)
     if not videos:
@@ -237,8 +251,9 @@ def main() -> None:
         videos=videos,
         device=args.device,
         syncnet_path=args.syncnet_path,
-        whisper_model=args.whisper_model,
+        whisper_model=whisper,
         label_map=label_map,
+        skip_leading_ms=skip_ms,
     )
     write_csv(rows, args.output)
 

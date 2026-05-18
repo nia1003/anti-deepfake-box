@@ -39,9 +39,11 @@ from fusion import WeightedEnsemble, MetaClassifier
 from fusion.weighted_ensemble import FusionResult
 
 
-def load_config(config_path: str) -> dict:
-    with open(config_path) as f:
-        return yaml.safe_load(f)
+def load_config(config_path: str, mode: str = None) -> dict:
+    import sys as _sys
+    _sys.path.insert(0, str(ROOT))
+    from configs import load_config as _load
+    return _load(config_path, mode=mode)
 
 
 def build_detectors(config: dict, skip: list = None):
@@ -205,6 +207,11 @@ def main():
     parser = argparse.ArgumentParser(description="Anti-Deepfake-Box single-video inference")
     parser.add_argument("--video", required=True, help="Path to input video")
     parser.add_argument("--config", default="configs/default.yaml", help="Config YAML path")
+    parser.add_argument("--mode", choices=["forensic", "realtime"], default=None,
+                        help=(
+                            "forensic  — high-accuracy, pixel crop cache, skip leading 80ms silence\n"
+                            "realtime  — fast, on-the-fly, low latency (default behaviour)"
+                        ))
     parser.add_argument("--fusion_mode", choices=["weighted", "meta"], default=None,
                         help="Override fusion mode from config")
     parser.add_argument("--skip", nargs="+", choices=["visual", "rppg", "sync"],
@@ -213,7 +220,9 @@ def main():
                         help="Use async pipeline (parallel audio+face extraction)")
     args = parser.parse_args()
 
-    config = load_config(args.config)
+    config = load_config(args.config, mode=args.mode)
+    if args.mode:
+        print(f"[mode] {args.mode}")
     if args.fusion_mode:
         config.setdefault("fusion", {})["mode"] = args.fusion_mode
 

@@ -15,6 +15,10 @@ class AudioExtractor:
         config = config or {}
         self.sample_rate: int = config.get("sample_rate", 16000)
         self.channels: int = config.get("channels", 1)
+        # Skip leading silence (ms). DFB-MM finding: FakeAVCeleb has 25-30ms
+        # leading silence in fake audio that causes shortcut learning.
+        # Set to 80 in forensic mode, 0 in realtime mode.
+        self.skip_leading_ms: int = config.get("skip_leading_ms", 0)
 
     def has_audio(self, video_path: str) -> bool:
         """Check if video has an audio stream."""
@@ -36,8 +40,8 @@ class AudioExtractor:
 
         Parameters
         ----------
-        video_path : path to input video
-        output_path : optional output WAV path. If None, writes to a temp file.
+        video_path  : path to input video
+        output_path : optional output WAV path; uses a temp file if None
 
         Returns
         -------
@@ -51,8 +55,11 @@ class AudioExtractor:
             output_path = tmp.name
             tmp.close()
 
-        cmd = [
-            "ffmpeg", "-y", "-i", str(video_path),
+        cmd = ["ffmpeg", "-y"]
+        if self.skip_leading_ms > 0:
+            cmd += ["-ss", f"{self.skip_leading_ms / 1000:.3f}"]
+        cmd += [
+            "-i", str(video_path),
             "-vn",
             "-acodec", "pcm_s16le",
             "-ar", str(self.sample_rate),

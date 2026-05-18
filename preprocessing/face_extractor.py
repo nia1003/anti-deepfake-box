@@ -108,6 +108,9 @@ class UnifiedFaceExtractor:
         self.cache_dir: Path = Path(config.get("face_cache_dir", ".face_cache"))
         self.use_cache: bool = config.get("use_face_cache", True)
         self.min_face_size: int = config.get("min_face_size", 30)
+        # Forensic mode: also cache aligned_256 pixel crops so subsequent runs
+        # skip video decode entirely (trades ~1.8 MB/clip for full speed-up).
+        self.cache_pixel_crops: bool = config.get("cache_pixel_crops", False)
 
         self._app: Optional[FaceAnalysis] = None
 
@@ -145,26 +148,34 @@ class UnifiedFaceExtractor:
 
     def _save_cache(self, track: FaceTrack, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Store lightweight metadata only (no pixel data)
-        np.savez_compressed(
-            str(path),
+        arrays = dict(
             frame_indices=track.frame_indices,
             bboxes=track.bboxes,
             landmarks=track.landmarks,
             fps=np.array([track.fps]),
             video_path=np.array([track.video_path]),
         )
+        if self.cache_pixel_crops:
+            # Forensic mode: store aligned_256 so next run skips video decode.
+            arrays["aligned_256"] = track.aligned_256
+        np.savez_compressed(str(path), **arrays)
 
     def _load_cache_meta(self, path: Path, video_path: str) -> Optional[dict]:
-        """Load cached bboxes/landmarks; pixel data must be re-extracted."""
+        """
+        Load cache. In forensic mode (aligned_256 present) returns a full
+        FaceTrack. Otherwise returns metadata dict for crop re-extraction.
+        """
         try:
             data = np.load(str(path), allow_pickle=True)
-            return {
+            meta = {
                 "frame_indices": data["frame_indices"],
                 "bboxes": data["bboxes"],
                 "landmarks": data["landmarks"],
                 "fps": float(data["fps"][0]),
             }
+            if "aligned_256" in data:
+                meta["aligned_256"] = data["aligned_256"]
+            return meta
         except Exception:
             return None
 

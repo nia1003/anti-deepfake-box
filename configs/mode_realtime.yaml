@@ -1,0 +1,38 @@
+# 快速辨別模式 (Realtime Mode)
+# 用途：即時偵測、詐騙電話、API 串流
+# 啟用方式：--mode realtime  (或不指定，此為預設行為)
+#
+# 特性：
+#   - 快速人臉模型 (buffalo_sc)
+#   - 少幀數 (32 幀，約 1.3 秒)
+#   - 不跳過前導靜音 (延遲優先)
+#   - 不緩存 pixel crops (即時抽取)
+#   - 滑窗模式，可處理即時串流
+
+preprocessing:
+  insightface_model: "buffalo_sc"      # 快速輕量
+  insightface_batch_size: 32
+  fps_target: 25.0
+  use_face_cache: true
+  cache_pixel_crops: false             # 不存 pixel，減少磁碟用量
+  face_cache_dir: ".face_cache/realtime"
+  sample_rate: 16000
+  channels: 1
+  skip_leading_ms: 0                   # 不跳過，優先降低延遲
+
+detectors:
+  visual:
+    max_frames: 32
+    batch_size: 16
+  rppg:
+    snr_threshold: 1.5
+  sync:
+    whisper_model: "tiny"              # 最小 Whisper，最快速
+
+fusion:
+  mode: "weighted"
+  threshold: 0.50
+  weights:
+    visual: 0.50
+    rppg:   0.25
+    sync:   0.25

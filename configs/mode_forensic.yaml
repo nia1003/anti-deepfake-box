@@ -1,0 +1,38 @@
+# 鑑識模式 (Forensic Mode)
+# 用途：批次研究、精確評估、FakeAVCeleb 實驗
+# 啟用方式：--mode forensic
+#
+# 特性：
+#   - 高精度人臉模型 (buffalo_l)
+#   - 更多幀數 (128 幀)
+#   - 音訊跳過前導靜音 80ms (FakeAVCeleb 已知問題)
+#   - 緩存 pixel crops (aligned_256 存入 NPZ，重複跑不需要重解碼)
+#   - 完整影片分析 (不用滑窗截斷)
+
+preprocessing:
+  insightface_model: "buffalo_l"       # 高精度，較慢
+  insightface_batch_size: 16           # 較大模型批次縮小
+  fps_target: 25.0
+  use_face_cache: true
+  cache_pixel_crops: true              # 存 aligned_256 到 NPZ（鑑識模式專用）
+  face_cache_dir: ".face_cache/forensic"
+  sample_rate: 16000
+  channels: 1
+  skip_leading_ms: 80                  # 跳過前導靜音 (FakeAVCeleb: 25-30ms)
+
+detectors:
+  visual:
+    max_frames: 128
+    batch_size: 8
+  rppg:
+    snr_threshold: 1.0                 # 寬鬆門檻，保留更多訊號
+  sync:
+    whisper_model: "small"             # 更大的 Whisper 模型，精度較高
+
+fusion:
+  mode: "weighted"
+  threshold: 0.50
+  weights:
+    visual: 0.40
+    rppg:   0.25
+    sync:   0.35                       # 音訊同步在鑑識時給更高權重
