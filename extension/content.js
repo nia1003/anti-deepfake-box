@@ -65,6 +65,11 @@ function fmt(v) { return v != null ? (v * 100).toFixed(0) + '%' : 'N/A'; }
 
 function captureAndSend(video) {
   if (!video || video.readyState < 2) return;
+  // Require network; pause detection silently when offline
+  if (!navigator.onLine) {
+    if (overlay) overlay.innerHTML = '<b>ADB</b> — offline';
+    return;
+  }
   const canvas = document.createElement('canvas');
   canvas.width = Math.min(video.videoWidth, 640);
   canvas.height = Math.min(video.videoHeight, 360);

@@ -68,7 +68,14 @@ _sync: Optional[SyncDetector] = None
 _fft: Optional[FFTDetector] = None
 _fuser: Optional[WeightedEnsemble] = None
 _sessions = SessionManager()
-_hw = detect_hardware()
+_hw: Optional[object] = None          # lazy — loaded on first /profile request
+
+
+def _get_hw():
+    global _hw
+    if _hw is None:
+        _hw = detect_hardware()
+    return _hw
 
 
 def _get_cfg() -> dict:
@@ -168,14 +175,15 @@ def health():
 @app.get("/profile")
 def profile():
     _ensure_loaded()
+    hw = _get_hw()
     cfg = _get_cfg()
     return {
         "hardware": {
-            "cpu_cores": _hw.cpu_cores,
-            "ram_gb":    round(_hw.ram_gb, 1),
-            "gpu":       _hw.gpu_name,
-            "vram_gb":   round(_hw.vram_gb, 1) if _hw.vram_gb else None,
-            "is_jetson": _hw.is_jetson,
+            "cpu_cores": hw.cpu_cores,
+            "ram_gb":    round(hw.ram_gb, 1),
+            "gpu":       hw.gpu_name,
+            "vram_gb":   round(hw.vram_gb, 1) if hw.vram_gb else None,
+            "is_jetson": hw.is_jetson,
         },
         "profile": _hw.profile_name,
         "device":  cfg.get("device", "cpu"),
@@ -255,6 +263,54 @@ async def detect_video_endpoint(req: VideoRequest):
         },
         "latency_s": round(time.time() - t0, 2),
     }
+
+
+# ── Email Report ─────────────────────────────────────────────────────────────
+
+_REPORT_COOLDOWN = 10.0                     # seconds between reports per sender
+_last_report_ts: dict[str, float] = {}      # key → last report timestamp
+
+
+class ReportRequest(BaseModel):
+    session_id: str = "default"
+    note: str = ""                          # optional freetext from user
+
+
+@app.post("/report")
+async def send_report(req: ReportRequest):
+    """
+    Queue an alert email for the current detection session.
+
+    Rate-limited to once every 10 seconds per session_id to prevent
+    accidental or malicious flooding of the email channel.
+    """
+    key = req.session_id
+    now = time.time()
+    last = _last_report_ts.get(key, 0.0)
+    wait = _REPORT_COOLDOWN - (now - last)
+    if wait > 0:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limited. Try again in {round(wait, 1)}s.",
+        )
+
+    _last_report_ts[key] = now
+
+    # Attach current detection state if session is active
+    state = _sessions.get_or_create(key)
+    payload = {
+        "session_id":  key,
+        "timestamp":   now,
+        "note":        req.note,
+        "last_score":  state.to_response().get("smoothed_score"),
+    }
+
+    # TODO: replace with actual SMTP / SendGrid call
+    # e.g. send_email(to=ALERT_EMAIL, subject="ADB Alert", body=str(payload))
+    import logging
+    logging.getLogger(__name__).warning("REPORT queued: %s", payload)
+
+    return {"sent": True, "session_id": key, "queued_at": now}
 
 
 # ── WebSocket Stream ──────────────────────────────────────────────────────────
