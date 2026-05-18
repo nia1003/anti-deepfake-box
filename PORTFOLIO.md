@@ -110,42 +110,154 @@ Weights determined empirically from per-modality AUC on benchmark datasets.
 
 ---
 
-### 4. DeepfakeBench Integration
+### 4. DeepfakeBench Framework Integration
 
-Extended [DeepfakeBench](https://github.com/SCLBD/DeepfakeBench) with three drop-in detector adapters conforming to its `AbstractDetector` interface (7 required methods):
+Extended [DeepfakeBench](https://github.com/SCLBD/DeepfakeBench) with drop-in detector adapters conforming to its `AbstractDetector` interface.
+
+#### Adapter Architecture
+
+Every DFB detector must implement 7 abstract methods and register via decorator:
+
+```python
+@DETECTOR.register_module(module_name='adb_visual')
+class ADBVisualDetector(AbstractDetector):
+    def build_backbone(self, config)  → nn.Module   # model architecture
+    def build_loss(self, config)      → nn.Module   # loss function
+    def features(self, data_dict)     → Tensor      # backbone forward pass
+    def classifier(self, features)    → Tensor      # classification head
+    def forward(self, data_dict, inference=False) → dict  # {cls, prob, feat}
+    def get_losses(self, data_dict, pred_dict)    → dict  # {overall, cls, ...}
+    def get_train_metrics(self, data_dict, pred_dict) → dict  # {acc, auc, eer, ap}
+```
+
+Plus a YAML config in `training/config/detector/` specifying model name, frame count, loss function, and test datasets.
 
 | Adapter | Registry key | Notes |
 |---------|-------------|-------|
-| `adb_visual_detector.py` | `adb_visual` | XceptionNet via ADB |
-| `adb_rppg_detector.py` | `adb_rppg` | POS rPPG via ADB |
-| `adb_sync_detector.py` | `adb_sync` | SyncNet, on-the-fly audio extraction |
+| `adb_visual_detector.py` | `adb_visual` | Wraps XceptionNet; converts DFB image batch to FaceTrack |
+| `adb_rppg_detector.py` | `adb_rppg` | Wraps POS algorithm; no GPU required |
+| `adb_sync_detector.py` | `adb_sync` | Wraps SyncNet; extracts audio on-the-fly from video_path |
+| `dummy_detector.py` | `dummy` | Minimal template for future contributors; always predicts 0.5 |
 
-This enables ADB detectors to be evaluated on DFB's standardised cross-dataset AUC protocol alongside 30+ existing detectors.
+This enables ADB detectors to run on DFB's standardised cross-dataset AUC benchmarking protocol alongside 30+ existing detectors.
 
-A `DummyDetector` was also contributed as a minimal integration verification template for future contributors.
+#### Known Blocker — `video_path` in `data_dict` (P9)
+
+DFB's standard `data_dict = {image, label}` carries no video path. `adb_sync_detector` calls `_get_audio_path(data_dict)` which returns `None` → sync score always 0.5. Fix requires modifying DFB's dataset loader to inject `video_path`; currently blocked pending a team member's dataset PR.
+
+**Workaround for testing**: pass a mock `data_dict` with `video_path` injected directly, or use `scripts/sync_score_csv.py` which bypasses DFB entirely.
+
+```python
+# P9 fix location: DeepfakeBench/training/dataset/abstract_dataset.py
+# Add to __getitem__ return dict:
+#   "video_path": self.video_list[index]
+```
 
 ---
 
 ### 5. Weak Classifier Selection Pipeline
 
-Before committing to a cascade configuration, each candidate weak classifier is evaluated independently:
+The cascade design requires empirical evidence that each modality is genuinely informative and non-redundant before committing to a configuration. The selection pipeline runs entirely on per-classifier CSV scores — no architectural changes needed.
+
+#### Stage 0 — Score Generation
+
+Each candidate detector generates its own score CSV via the ADB evaluation pipeline or the standalone CSV bridge:
+
+```bash
+# Visual / rPPG scores — via DFB evaluate:
+python training/train.py --detector_path config/detector/adb_visual.yaml --phase test
+
+# Sync scores — via ADB standalone (no DFB loader dependency):
+python scripts/sync_score_csv.py \
+    --input_dir /data/FakeAVCeleb/test \
+    --label_csv labels.csv \
+    --output results/sync_scores.csv \
+    --mode forensic          # 80ms leading-silence skip, whisper=small
+```
+
+Output CSV format (matches 曉蓮's GP-solver input):
+
+```
+video_id, fake_score, label, inference_ms
+RealVideo_001, 0.142310, 0, 38.4
+FakeVideo_002, 0.871204, 1, 41.1
+```
+
+#### Stage 1–4 — Selection Pipeline
 
 ```
 Per-classifier CSV (video_id, fake_score, label)
         ↓
-① AUC filter  (drop if AUC < 0.55)
-② Correlation matrix  (drop redundant classifiers, corr > 0.9)
-③ FAR/FRR curve comparison  (keep complementary operating points)
-④ Pareto dominance check  (remove dominated configurations)
+① AUC filter         drop if AUC < 0.55  (better than random)
+② Correlation matrix  drop if corr > 0.9  (redundant classifiers add no information)
+③ FAR/FRR curves     keep complementary operating points
+                      (a low-FAR specialist pairs well with a low-FRR generalist)
+④ Pareto dominance   remove dominated configurations
+                      (a classifier worse at both FAR and FRR than another is excluded)
         ↓
-Final weak classifier set → cascade design
+Final weak classifier set → cascade stage ordering
 ```
 
-The **sync-score CSV bridge** (`scripts/sync_score_csv.py`) produces the input CSV for this pipeline, running SyncDetector on a video directory without requiring the full DFB dataset loader.
+The **correlation check** is critical: two detectors that both detect GAN frequency artifacts will be highly correlated and contribute little in combination. An rPPG detector (physiological signal) and a visual detector (spatial artifacts) are structurally independent, making them strong cascade partners.
 
 ---
 
-### 6. Real-Time Edge Deployment
+### 6. Serial Cascade & GP-Solver Interface
+
+The BMMA-GPT serial cascade applies per-stage dual thresholds; the optimal thresholds and stage ordering are found by a Pareto-front search over FAR/FRR space.
+
+#### Cascade Decision Logic
+
+```
+Stage k receives sample s with score p_k(s):
+  p_k(s) ≥ H_k  →  early exit: FAKE    (high confidence fake)
+  p_k(s) ≤ L_k  →  early exit: REAL    (high confidence real)
+  L_k < p_k(s) < H_k  →  pass to stage k+1
+```
+
+The cascade terminates at the last stage with a hard decision regardless of confidence.
+
+#### Pareto-Front Search
+
+For a given ordered set of weak classifiers {C₁, C₂, …, Cₙ} and thresholds {(H₁,L₁), …, (Hₙ,Lₙ)}, the search minimises:
+
+- **FAR** (False Accept Rate) — fake accepted as real  
+- **FRR** (False Reject Rate) — real rejected as fake  
+- **Average inference cost** — fraction of samples reaching each stage
+
+The Pareto front is the set of threshold configurations where no configuration is strictly better on all three objectives simultaneously. In practice FAR and FRR are weighted by application cost (fraud scenario: FAR >> FRR penalty).
+
+#### Interface with GP Solver (曉蓮)
+
+The CSV bridge (`sync_score_csv.py`) produces the exact input format expected by the team's GP-solver component. The solver takes one CSV per candidate classifier, and outputs:
+
+1. Optimal stage ordering (permutation of classifiers)
+2. Per-stage `(H, L)` threshold pair
+3. Expected FAR / FRR / cost at the Pareto-optimal point
+
+```
+ADB scripts/          →  per-classifier CSVs   →  GP solver  →  cascade config
+sync_score_csv.py          {video_id, fake_score,                 {stage_order,
+evaluate.py                 label, inference_ms}                   thresholds,
+                                                                    pareto_point}
+```
+
+The cascade config is then loaded by `fusion/serial_cascade.py` (planned; depends on GP-solver output).
+
+#### Thresholds vs. Weights
+
+The cascade is architecturally distinct from the weighted ensemble:
+
+| | Weighted Ensemble | Serial Cascade |
+|---|---|---|
+| Computation | All modalities always run | Early exit skips downstream |
+| Fusion | α·visual + β·rppg + γ·sync | Per-stage dual-threshold gate |
+| Optimisation | Weight grid search on AUC | Pareto search on FAR/FRR/cost |
+| Use case | Batch analysis, max accuracy | Real-time, latency-constrained |
+
+---
+
+### 7. Real-Time Edge Deployment
 
 **Chrome Extension**
 - Content script detects the largest `<video>` element on any webpage
