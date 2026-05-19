@@ -146,7 +146,13 @@ class UnifiedFaceExtractor:
     def _cache_path(self, video_path: str) -> Path:
         return self.cache_dir / f"{self._cache_key(video_path)}.npz"
 
-    def _save_cache(self, track: FaceTrack, path: Path) -> None:
+    def _save_cache(
+        self,
+        track: FaceTrack,
+        path: Path,
+        audio_samples: Optional[np.ndarray] = None,
+        audio_sr: int = 16000,
+    ) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         arrays = dict(
             frame_indices=track.frame_indices,
@@ -158,6 +164,13 @@ class UnifiedFaceExtractor:
         if self.cache_pixel_crops:
             # Forensic mode: store aligned_256 so next run skips video decode.
             arrays["aligned_256"] = track.aligned_256
+            if audio_samples is not None:
+                arrays["audio_samples"] = audio_samples.astype(np.int16)
+                arrays["audio_sr"] = np.array([audio_sr])
+                # 16000 Hz / 25 fps = 640 samples per frame (DFB-MM §3.1)
+                arrays["frame_to_audio_offset"] = (
+                    track.frame_indices * audio_sr / track.fps
+                ).astype(np.int64)
         np.savez_compressed(str(path), **arrays)
 
     def _load_cache_meta(self, path: Path, video_path: str) -> Optional[dict]:
@@ -220,6 +233,46 @@ class UnifiedFaceExtractor:
             fi += 1
         cap.release()
         return np.stack(frames) if frames else np.empty((0, 0, 0, 3), np.uint8), native_fps, indices[:len(frames)]
+
+    # ------------------------------------------------------------------ #
+    #  Paper-aligned preprocessing helpers                                #
+    # ------------------------------------------------------------------ #
+
+    def _filter_single_face_frames(
+        self,
+        faces_per_frame: List[Tuple[int, list]],
+        min_frames: int = 8,
+    ) -> List[Tuple[int, object]]:
+        """
+        Keep only frames with exactly one detected face (DFB-MM paper criterion).
+        Fallback to best-face selection when fewer than min_frames survive.
+        """
+        single = [(idx, faces[0]) for idx, faces in faces_per_frame if len(faces) == 1]
+        if len(single) >= min_frames:
+            return single
+        # Fallback: any frame with at least one face (pick largest)
+        return [
+            (idx, max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1])))
+            for idx, faces in faces_per_frame
+            if len(faces) >= 1
+        ]
+
+    def _smooth_bboxes(self, bboxes: np.ndarray, window: int = 3) -> np.ndarray:
+        """
+        Causal moving-average (window=3) on bbox centre + size (DFB-MM §3.2).
+        Operates in-place on a copy; original unchanged.
+        """
+        bboxes = bboxes.copy().astype(np.float32)
+        cx = (bboxes[:, 0] + bboxes[:, 2]) / 2.0
+        cy = (bboxes[:, 1] + bboxes[:, 3]) / 2.0
+        w  = bboxes[:, 2] - bboxes[:, 0]
+        h  = bboxes[:, 3] - bboxes[:, 1]
+        k = np.ones(window, dtype=np.float32) / window
+        for arr in (cx, cy, w, h):
+            arr[:] = np.convolve(arr, k, mode="same")
+        return np.stack(
+            [cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2], axis=1
+        ).astype(bboxes.dtype)
 
     # ------------------------------------------------------------------ #
     #  Face detection & alignment                                         #
@@ -371,6 +424,10 @@ class UnifiedFaceExtractor:
         valid_lmks = np.stack([lmk_list[i] for i, v in enumerate(valid_mask) if v])
         valid_aligned = np.stack([aligned_list[i] for i, v in enumerate(valid_mask) if v])
 
+        # Temporal smoothing on bboxes (DFB-MM §3.2, causal MA window=3)
+        if len(valid_bboxes) >= 3:
+            valid_bboxes = self._smooth_bboxes(valid_bboxes)
+
         track = FaceTrack(
             frame_indices=valid_indices,
             bboxes=valid_bboxes,
@@ -381,6 +438,18 @@ class UnifiedFaceExtractor:
         )
 
         if self.use_cache:
-            self._save_cache(track, cache_path)
+            # In forensic (cache_pixel_crops) mode, embed audio PCM in the NPZ
+            audio_samples: Optional[np.ndarray] = None
+            audio_sr = 16000
+            if self.cache_pixel_crops:
+                try:
+                    from preprocessing.audio_extractor import AudioExtractor as _AE
+                    _ae = _AE({"sample_rate": audio_sr, "skip_leading_ms": getattr(self, "skip_leading_ms", 0)})
+                    result = _ae.extract_to_array(video_path)
+                    if result is not None:
+                        audio_samples, audio_sr = result
+                except Exception:
+                    pass
+            self._save_cache(track, cache_path, audio_samples=audio_samples, audio_sr=audio_sr)
 
         return track

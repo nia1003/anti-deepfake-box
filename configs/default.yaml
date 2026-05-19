@@ -40,8 +40,9 @@ detectors:
 #  Fusion                                                              #
 # ------------------------------------------------------------------ #
 fusion:
-  mode: "weighted"     # "weighted" | "meta"
+  mode: "weighted"     # "weighted" | "meta" | "cascade"
   threshold: 0.50      # decision threshold
+  cascade_config: ""   # path to GP solver's real_data_vip_settings.csv (required for cascade mode)
   weights:
     visual: 0.50
     rppg:   0.25

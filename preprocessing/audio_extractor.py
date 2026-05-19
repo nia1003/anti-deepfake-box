@@ -77,3 +77,33 @@ class AudioExtractor:
     def extract_to_temp(self, video_path: str) -> Optional[str]:
         """Extract audio to a temporary file. Caller must delete it."""
         return self.extract(video_path, output_path=None)
+
+    def extract_to_array(self, video_path: str):
+        """
+        Extract audio as PCM int16 ndarray via ffmpeg pipe (no temp file).
+        Applies skip_leading_ms offset.
+
+        Returns (samples, sample_rate) or None if extraction fails.
+        samples: np.ndarray of dtype int16, shape (N,)
+        """
+        import numpy as np
+        cmd = ["ffmpeg", "-y"]
+        if self.skip_leading_ms > 0:
+            cmd += ["-ss", f"{self.skip_leading_ms / 1000:.3f}"]
+        cmd += [
+            "-i", str(video_path),
+            "-vn",
+            "-acodec", "pcm_s16le",
+            "-ar", str(self.sample_rate),
+            "-ac", "1",
+            "-f", "s16le",
+            "pipe:1",
+        ]
+        try:
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=120)
+            if proc.returncode != 0 or not proc.stdout:
+                return None
+            samples = np.frombuffer(proc.stdout, dtype=np.int16)
+            return samples, self.sample_rate
+        except Exception:
+            return None

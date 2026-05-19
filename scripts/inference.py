@@ -68,6 +68,9 @@ def build_fusion(config: dict):
         else:
             print("[WARNING] Meta-classifier weights not found, falling back to weighted ensemble.")
             fuser = WeightedEnsemble(config)
+    elif mode == "cascade":
+        from fusion import SerialCascade
+        fuser = SerialCascade(config)
     else:
         fuser = WeightedEnsemble(config)
     return fuser
@@ -212,7 +215,7 @@ def main():
                             "forensic  — high-accuracy, pixel crop cache, skip leading 80ms silence\n"
                             "realtime  — fast, on-the-fly, low latency (default behaviour)"
                         ))
-    parser.add_argument("--fusion_mode", choices=["weighted", "meta"], default=None,
+    parser.add_argument("--fusion_mode", choices=["weighted", "meta", "cascade"], default=None,
                         help="Override fusion mode from config")
     parser.add_argument("--skip", nargs="+", choices=["visual", "rppg", "sync"],
                         default=[], help="Skip specified modalities")
