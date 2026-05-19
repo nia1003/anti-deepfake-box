@@ -35,6 +35,7 @@ sys.path.insert(0, str(ROOT))
 
 from preprocessing import UnifiedFaceExtractor, AudioExtractor
 from detectors import VisualDetector, RPPGDetector, SyncDetector
+from detectors.registry import build_detector, DEFAULTS
 from fusion import WeightedEnsemble, MetaClassifier
 from fusion.weighted_ensemble import FusionResult
 
@@ -47,14 +48,17 @@ def load_config(config_path: str, mode: str = None) -> dict:
 
 
 def build_detectors(config: dict, skip: list = None):
+    """Build active detector instances using the registry, driven by config detector keys."""
     skip = skip or []
+    det_cfgs = config.get("detectors", {})
     detectors = {}
-    if "visual" not in skip:
-        detectors["visual"] = VisualDetector(config.get("detectors", {}).get("visual", config))
-    if "rppg" not in skip:
-        detectors["rppg"] = RPPGDetector(config.get("detectors", {}).get("rppg", config))
-    if "sync" not in skip:
-        detectors["sync"] = SyncDetector(config.get("detectors", {}).get("sync", config))
+    for modality in ("visual", "rppg", "sync"):
+        if modality in skip:
+            continue
+        mod_cfg = det_cfgs.get(modality, config)
+        key = mod_cfg.get("detector", DEFAULTS[modality])
+        det, _ = build_detector(modality, key, mod_cfg)
+        detectors[modality] = det
     return detectors
 
 

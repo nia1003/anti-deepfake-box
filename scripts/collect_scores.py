@@ -2,30 +2,36 @@
 """
 Unified weak-classifier score collection for Anti-Deepfake-Box.
 
-Runs all three detectors (visual / rPPG / sync) on a video directory in a
+Runs selected detectors (visual / rPPG / sync) on a video directory in a
 single pass — one face extraction shared across all modalities (SSOT) — and
 writes three separate CSVs in the 12-column GP-solver data contract format.
+
+Output CSVs are named {modality}_{detector_key}_scores.csv so multiple runs
+with different detector choices can coexist in the same output_dir.
+cascade_selection.py loads all *_scores.csv files from a directory and selects
+the best per-modality detector automatically.
 
 Output format (matches Week 11 GP data contract / fusion_solver_prod_v1.ipynb):
     sample_id, dataset, label, detector_name, modality, fake_score,
     score_type, inference_time_ms, window_start_sec, window_end_sec,
     status, error_message
 
-GP solver loads all three files via:
-    load_real_data(['results/visual_scores.csv',
-                    'results/rppg_scores.csv',
-                    'results/sync_scores.csv'])
-and aligns rows by sample_id.
-
 Usage
 -----
-# All three modalities:
+# Default (Xception + POS + SyncNet):
 python scripts/collect_scores.py \\
     --input_dir /data/FakeAVCeleb/test \\
     --label_csv /data/FakeAVCeleb/labels.csv \\
     --output_dir results/ \\
     --dataset FakeAVCeleb \\
     --mode forensic
+
+# Use UCF visual detector (requires DeepfakeBench on DFB_PATH):
+python scripts/collect_scores.py \\
+    --input_dir /data/FakeAVCeleb/test \\
+    --output_dir results/ \\
+    --visual_detector ucf \\
+    --dfb_pretrained /ckpts/ucf_ff.pth
 
 # Skip sync (for FF++ which has no audio):
 python scripts/collect_scores.py \\
@@ -34,10 +40,11 @@ python scripts/collect_scores.py \\
     --dataset FF++ \\
     --skip sync
 
-# CPU-only:
+# CPU-only with SBI:
 python scripts/collect_scores.py \\
     --input_dir /data/test \\
     --output_dir results/ \\
+    --visual_detector sbi \\
     --device cpu
 
 Notes
@@ -48,6 +55,7 @@ Notes
 * Videos with no audio track: sync row gets status="failed",
   error_message="no_audio_track".
 * Leading silence skip (forensic mode): 80 ms, matches DFB-MM §B.1.
+* DFB-backed detectors require: export DFB_PATH=/path/to/DeepfakeBench
 """
 
 from __future__ import annotations
@@ -65,9 +73,7 @@ sys.path.insert(0, str(ROOT))
 
 from preprocessing.audio_extractor import AudioExtractor
 from preprocessing.face_extractor import UnifiedFaceExtractor
-from detectors.visual_detector import VisualDetector
-from detectors.rppg_detector import RPPGDetector
-from detectors.sync_detector import SyncDetector
+from detectors.registry import VISUAL_REGISTRY, RPPG_REGISTRY, SYNC_REGISTRY, DEFAULTS, build_detector
 
 
 # ------------------------------------------------------------------ #
@@ -88,24 +94,6 @@ FIELDNAMES = [
     "status",
     "error_message",
 ]
-
-DETECTOR_META: Dict[str, Dict[str, str]] = {
-    "visual": {
-        "detector_name": "Xception",
-        "modality":      "visual",
-        "score_type":    "probability",
-    },
-    "rppg": {
-        "detector_name": "POS",
-        "modality":      "rppg",
-        "score_type":    "snr",
-    },
-    "sync": {
-        "detector_name": "SyncNet",
-        "modality":      "av_sync",
-        "score_type":    "sync_error",
-    },
-}
 
 
 # ------------------------------------------------------------------ #
@@ -153,15 +141,74 @@ def score_all_detectors(
     skip_leading_ms: int = 0,
     dataset_name: str = "",
     skip: Optional[List[str]] = None,
+    visual_detector: str = "xception",
+    rppg_detector: str = "pos",
+    sync_detector: str = "syncnet",
+    dfb_pretrained: str = "",
+    visual_pretrained: str = "",
 ) -> Dict[str, List[Dict]]:
     """
-    Run all three detectors on every video using a single face extraction pass.
+    Run selected detectors on every video using a single face extraction pass.
 
-    Returns dict mapping modality name → list of row dicts (12 columns each).
+    Returns dict keyed by "{modality}_{detector_key}" (e.g. "visual_xception").
+    CSV filename: {key}_scores.csv — multiple runs coexist in the same output_dir.
     Failed rows are included with status="failed" — never dropped.
     """
     label_map = label_map or {}
     skip = skip or []
+
+    # Per-modality detector configs
+    vis_cfg = {
+        "device": device,
+        "pretrained": visual_pretrained,
+        "dfb_pretrained": dfb_pretrained,
+    }
+    rppg_cfg = {"device": "cpu"}
+    sync_cfg = {
+        "device": device,
+        "syncnet_path": syncnet_path,
+        "whisper_model": whisper_model,
+        "whisper_device": "cpu",
+    }
+
+    # Build active detectors via registry
+    # active_det: modality → detector instance
+    # active_meta: modality → {detector_name, modality, score_type, ...}
+    # active_key: modality → detector key string
+    active_det: Dict[str, object] = {}
+    active_meta: Dict[str, dict] = {}
+    active_key: Dict[str, str] = {}
+
+    if "visual" not in skip:
+        det, meta = build_detector("visual", visual_detector, vis_cfg)
+        active_det["visual"] = det
+        active_meta["visual"] = meta
+        active_key["visual"] = visual_detector
+        print(f"[visual]  {meta['detector_name']}  ({meta['status']})")
+
+    if "rppg" not in skip:
+        det, meta = build_detector("rppg", rppg_detector, rppg_cfg)
+        active_det["rppg"] = det
+        active_meta["rppg"] = meta
+        active_key["rppg"] = rppg_detector
+        print(f"[rppg]    {meta['detector_name']}  ({meta['status']})")
+
+    if "sync" not in skip:
+        det, meta = build_detector("sync", sync_detector, sync_cfg)
+        active_det["sync"] = det
+        active_meta["sync"] = meta
+        active_key["sync"] = sync_detector
+        print(f"[sync]    {meta['detector_name']}  ({meta['status']})")
+
+    print()
+
+    # Output rows keyed by "{modality}_{key}" for distinct CSV filenames
+    rows: Dict[str, List[Dict]] = {
+        f"{active_meta[m]['modality']}_{active_key[m]}": []
+        for m in active_det
+    }
+    # Map from modality → row_key for inner loop
+    row_key_for = {m: f"{active_meta[m]['modality']}_{active_key[m]}" for m in active_det}
 
     # Build extractors
     audio_ext = AudioExtractor({
@@ -171,21 +218,6 @@ def score_all_detectors(
     })
     face_ext = UnifiedFaceExtractor({"device": device, "use_face_cache": True})
 
-    # Build active detectors
-    active: Dict[str, object] = {}
-    if "visual" not in skip:
-        active["visual"] = VisualDetector({"device": device})
-    if "rppg" not in skip:
-        active["rppg"] = RPPGDetector({"device": "cpu"})
-    if "sync" not in skip:
-        active["sync"] = SyncDetector({
-            "device": device,
-            "syncnet_path": syncnet_path,
-            "whisper_model": whisper_model,
-            "whisper_device": "cpu",
-        })
-
-    rows: Dict[str, List[Dict]] = {name: [] for name in active}
     total = len(videos)
 
     for idx, vp in enumerate(videos, 1):
@@ -204,7 +236,7 @@ def score_all_detectors(
         # ── Audio extraction (shared by sync) ─────────────────────────
         wav_path: Optional[str] = None
         audio_err = ""
-        if "sync" in active:
+        if "sync" in active_det:
             try:
                 if audio_ext.has_audio(str(vp)):
                     wav_path = audio_ext.extract_to_temp(str(vp))
@@ -216,7 +248,7 @@ def score_all_detectors(
                 audio_err = f"audio_extract_error: {str(exc)[:100]}"
 
         # ── Per-detector inference ────────────────────────────────────
-        for name, det in active.items():
+        for modality, det in active_det.items():
             t0 = time.time()
             score: Optional[float] = None
             status = "ok"
@@ -225,7 +257,7 @@ def score_all_detectors(
             try:
                 if face_track is None:
                     raise RuntimeError(face_err or "face_not_detected")
-                if name == "sync":
+                if modality == "sync":
                     if wav_path is None:
                         raise RuntimeError(audio_err or "no_audio_track")
                     score = det.detect(face_track, wav_path)
@@ -237,21 +269,25 @@ def score_all_detectors(
                 status, err = "failed", str(exc)[:120]
 
             ms = round((time.time() - t0) * 1000, 1)
-            rows[name].append({
-                "sample_id":        vp.stem,
-                "dataset":          dataset_name,
-                "label":            label_map.get(vp.stem, ""),
-                **DETECTOR_META[name],
-                "fake_score":       f"{score:.6f}" if score is not None else "",
+            meta = active_meta[modality]
+            rows[row_key_for[modality]].append({
+                "sample_id":         vp.stem,
+                "dataset":           dataset_name,
+                "label":             label_map.get(vp.stem, ""),
+                "detector_name":     meta["detector_name"],
+                "modality":          meta["modality"],
+                "score_type":        meta["score_type"],
+                "fake_score":        f"{score:.6f}" if score is not None else "",
                 "inference_time_ms": ms,
-                "window_start_sec": "N/A",
-                "window_end_sec":   "N/A",
-                "status":           status,
-                "error_message":    err,
+                "window_start_sec":  "N/A",
+                "window_end_sec":    "N/A",
+                "status":            status,
+                "error_message":     err,
             })
 
             tag = f"{score:.4f}" if score is not None else f"FAILED({err})"
-            print(f"  [{name:6s}] {tag}  ({ms:.0f} ms)")
+            det_name = meta["detector_name"]
+            print(f"  [{modality:6s}/{det_name:12s}] {tag}  ({ms:.0f} ms)")
 
         # ── Cleanup temp audio ────────────────────────────────────────
         if wav_path and Path(wav_path).exists():
@@ -267,23 +303,23 @@ def score_all_detectors(
 #  Output                                                              #
 # ------------------------------------------------------------------ #
 
-def write_csvs(rows_by_detector: Dict[str, List[Dict]], output_dir: str) -> None:
+def write_csvs(rows_by_key: Dict[str, List[Dict]], output_dir: str) -> None:
+    """Write one CSV per detector run. Filename: {modality}_{detector_key}_scores.csv."""
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    for name, rows in rows_by_detector.items():
-        out = Path(output_dir) / f"{name}_scores.csv"
+    for key, rows in rows_by_key.items():
+        out = Path(output_dir) / f"{key}_scores.csv"
         with open(out, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
             writer.writeheader()
             writer.writerows(rows)
         ok = sum(1 for r in rows if r["status"] == "ok")
-        print(f"  {name:6s} → {out}  ({ok}/{len(rows)} ok)")
+        print(f"  {key:30s} → {out.name}  ({ok}/{len(rows)} ok)")
 
-    # Quick score summary
     print()
-    for name, rows in rows_by_detector.items():
+    for key, rows in rows_by_key.items():
         scored = [float(r["fake_score"]) for r in rows if r["fake_score"]]
         if scored:
-            print(f"  [{name}] range [{min(scored):.3f}, {max(scored):.3f}]"
+            print(f"  [{key}] range [{min(scored):.3f}, {max(scored):.3f}]"
                   f"  mean={sum(scored)/len(scored):.3f}  n={len(scored)}")
 
 
@@ -305,7 +341,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--label_csv",    default="",          help="Optional CSV with sample_id/video_id,label")
     p.add_argument("--dataset",      default="",          help="Dataset name written to CSV (e.g. FakeAVCeleb)")
     p.add_argument("--device",       default="cuda",      help="Torch device: cuda or cpu")
-    p.add_argument("--syncnet_path", default="",          help="Optional SyncNet checkpoint")
+    p.add_argument("--syncnet_path", default="",          help="Optional SyncNet checkpoint path")
     p.add_argument("--whisper_model", default="tiny",
                    choices=["tiny", "base", "small", "medium", "large"])
     p.add_argument("--mode", choices=["forensic", "realtime"], default="realtime",
@@ -315,6 +351,39 @@ def parse_args() -> argparse.Namespace:
                    ))
     p.add_argument("--skip", nargs="+", choices=["visual", "rppg", "sync"],
                    default=[], help="Skip specified modalities")
+
+    # ── Detector selection ────────────────────────────────────────────
+    p.add_argument(
+        "--visual_detector",
+        default=DEFAULTS["visual"],
+        choices=sorted(VISUAL_REGISTRY),
+        help=(
+            "Visual detector algorithm (default: xception).\n"
+            "Tested: xception, ucf, sbi, f3net, spsl, srm\n"
+            "Planned: efficientnet_b4, facexray, lsda\n"
+            "DFB-backed detectors require: export DFB_PATH=/path/to/DeepfakeBench"
+        ),
+    )
+    p.add_argument(
+        "--rppg_detector",
+        default=DEFAULTS["rppg"],
+        choices=sorted(RPPG_REGISTRY),
+        help="rPPG detector algorithm (default: pos). Backup: tscan (rppg_toolbox required)",
+    )
+    p.add_argument(
+        "--sync_detector",
+        default=DEFAULTS["sync"],
+        choices=sorted(SYNC_REGISTRY),
+        help="AV-sync detector algorithm (default: syncnet). Others are planned stubs.",
+    )
+    p.add_argument(
+        "--dfb_pretrained", default="",
+        help="Path to DFB checkpoint for DFB-backed visual detectors (ucf/sbi/f3net/...)",
+    )
+    p.add_argument(
+        "--visual_pretrained", default="",
+        help="Path to Xception checkpoint (used when --visual_detector xception)",
+    )
     return p.parse_args()
 
 
@@ -325,9 +394,12 @@ def main() -> None:
     whisper = args.whisper_model
     if args.mode == "forensic" and whisper == "tiny":
         whisper = "small"
+
     print(f"[mode={args.mode}]  skip_leading_ms={skip_ms}  whisper={whisper}")
+    print(f"[detectors]  visual={args.visual_detector}  rppg={args.rppg_detector}  sync={args.sync_detector}")
     if args.skip:
         print(f"[skip] {args.skip}")
+    print()
 
     videos = _collect_videos(args.input_dir, args.video_list)
     if not videos:
@@ -349,6 +421,11 @@ def main() -> None:
         skip_leading_ms=skip_ms,
         dataset_name=args.dataset,
         skip=args.skip,
+        visual_detector=args.visual_detector,
+        rppg_detector=args.rppg_detector,
+        sync_detector=args.sync_detector,
+        dfb_pretrained=args.dfb_pretrained,
+        visual_pretrained=args.visual_pretrained,
     )
 
     print(f"\nWrote {sum(len(v) for v in rows.values())} rows to {args.output_dir}/")

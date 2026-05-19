@@ -18,20 +18,33 @@ preprocessing:
 # ------------------------------------------------------------------ #
 #  Detectors                                                           #
 # ------------------------------------------------------------------ #
+# 'detector' key selects which algorithm to run per modality.
+# Available keys (see detectors/registry.py for full list + status):
+#   visual:  xception (default) | ucf | sbi | f3net | spsl | srm | efficientnet_b4 | facexray | lsda
+#   rppg:    pos (default) | tscan | physmamba
+#   sync:    syncnet (default) | mrdf | latentsync | avad
+#
+# For DFB-backed detectors (ucf/sbi/f3net/spsl/srm/...):
+#   export DFB_PATH=/path/to/DeepfakeBench
+#   set dfb_pretrained to the appropriate DFB checkpoint path
 detectors:
   visual:
-    pretrained: "checkpoints/xception_ff_c23.pth"   # FF++ c23 XceptionNet (download via Colab notebook)
+    detector: "xception"    # key from VISUAL_REGISTRY
+    pretrained: "checkpoints/xception_ff_c23.pth"   # xception checkpoint
+    dfb_pretrained: ""      # DFB checkpoint path (ucf/sbi/f3net/spsl/srm/...)
     max_frames: 32
     batch_size: 8
     device: "cuda"
 
   rppg:
-    snr_threshold: 1.5   # calibrate via scripts/calibrate_snr.py
+    detector: "pos"         # key from RPPG_REGISTRY
+    snr_threshold: 1.5      # calibrate via scripts/calibrate_snr.py
     snr_scale: 1.0
-    device: "cpu"        # POS is pure NumPy — no GPU needed
+    device: "cpu"           # POS is pure NumPy — no GPU needed
 
   sync:
-    syncnet_path: "checkpoints/latentsync_syncnet.pth"   # ByteDance/LatentSync-1.6 (download via Colab notebook)
+    detector: "syncnet"     # key from SYNC_REGISTRY
+    syncnet_path: "checkpoints/latentsync_syncnet.pth"   # ByteDance/LatentSync-1.6
     whisper_model: "tiny"
     whisper_device: "cpu"   # CPU to avoid VRAM competition with other models
     device: "cuda"
