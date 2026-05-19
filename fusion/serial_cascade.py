@@ -235,9 +235,16 @@ class SerialCascade:
 
         modalities_used = sum(1 for v in raw_scores.values() if v is not None)
 
+        # Fallback (no stage made a decision): treat as uncertain → is_fake=False,
+        # consistent with WeightedEnsemble all-None behaviour.
+        if exit_stage is None:
+            is_fake = False
+        else:
+            is_fake = final_score >= self.default_threshold
+
         return FusionResult(
             fake_score=float(final_score),
-            is_fake=final_score >= self.default_threshold,
+            is_fake=is_fake,
             threshold=self.default_threshold,
             scores=raw_scores,
             weights_used={s.name: s.H for s in self.stages},

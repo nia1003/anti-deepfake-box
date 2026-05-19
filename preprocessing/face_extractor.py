@@ -260,9 +260,12 @@ class UnifiedFaceExtractor:
     def _smooth_bboxes(self, bboxes: np.ndarray, window: int = 3) -> np.ndarray:
         """
         Causal moving-average (window=3) on bbox centre + size (DFB-MM §3.2).
-        Operates in-place on a copy; original unchanged.
+        Operates on a copy; original unchanged.
+        Returns bboxes unchanged when sequence is shorter than window.
         """
         bboxes = bboxes.copy().astype(np.float32)
+        if len(bboxes) < window:
+            return bboxes
         cx = (bboxes[:, 0] + bboxes[:, 2]) / 2.0
         cy = (bboxes[:, 1] + bboxes[:, 3]) / 2.0
         w  = bboxes[:, 2] - bboxes[:, 0]
