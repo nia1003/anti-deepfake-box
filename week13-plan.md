@@ -124,6 +124,14 @@ Stage 3 觸發（Visual, ~225ms）→ 完整跑完
 全不確定（0.5）               → 最壞情況 ~225ms + 可選 LLM 500ms
 ```
 
+### 3D Pareto 前緣分析圖
+
+> 圖示：x 軸 FRR（安全）、y 軸 FAR（彈性）、z 軸 延遲 ms。
+> **紅點** = Pareto 前緣解（無法同時在三個維度都更小的點）；灰點 = 被支配解。
+> 前緣從左下角（低 FAR / 低 FRR / 高延遲）到右上角（高 FAR / 高 FRR / 低延遲），
+> 展示安全-彈性-速度的三角取捨。左前方紅點（延遲 ~50ms、FAR ~0.1）代表
+> rPPG-first Cascade 的 early-exit 配置，是 edge 部署的目標區域。
+
 ### GP solver 3D Pareto（計畫）
 
 原 GP solver 最佳化 FAR + FRR（2D），加入 `inference_time_ms` budget 後：
@@ -214,14 +222,107 @@ STFT hop = 160 samples（10ms）→ 4 STFT frames/video frame
 
 ---
 
-## 九、下一步（Week 14+）
+## 九、ADB 執行流程（Mermaid）
 
-| 優先 | 任務 | 負責 |
+```mermaid
+flowchart TD
+    subgraph INPUT["輸入"]
+        V[影片檔案]
+    end
+
+    subgraph PREPROC["前處理（Pipe 工程 — 亮節）"]
+        FE["face_extractor\n• _filter_single_face_frames\n• _smooth_bboxes(window=3)\n→ FaceTrack (NPZ cache)"]
+        AE["audio_extractor\n• skip_leading_ms=80\n• extract_to_array() PCM\n→ WAV / ndarray"]
+    end
+
+    subgraph DETECTORS["弱分類器（A 組各自負責）"]
+        VIS["Visual Detector\nXceptionNet / SBI / UCF / SPSL / SRM / F3Net\n→ fake_score + Grad-CAM"]
+        RPP["rPPG Detector\nPOS\n→ fake_score + BVP waveform + SNR"]
+        SYN["Sync Detector\nSyncNet-MDS\n→ fake_score + window timeline"]
+    end
+
+    subgraph COLLECT["批次推論（Pipe 工程 — 亮節）"]
+        CS["collect_scores.py\n12-col CSV × 3 modalities\nnever drop failed rows"]
+    end
+
+    subgraph FUSION["融合（Fusion 工程 — 曉蓮）"]
+        GP["GP Solver\nfusion_solver_prod_v1.ipynb\n3D Pareto: FAR / FRR / Latency"]
+        CC["real_data_vip_settings.csv\nstage_order, modality\nthreshold_H, threshold_L"]
+        SC["SerialCascade.fuse()\n→ FusionResult\n{ fake_score, trigger,\n  trigger_reason, evidence }"]
+    end
+
+    subgraph EXPLAIN["可解釋性（Fusion 工程 — 曉蓮）"]
+        L1["Layer 1：數值\nfake_score + trigger_reason"]
+        L2["Layer 2：訊號\nGrad-CAM path\nBVP waveform path\nSync timeline"]
+        L3["Layer 3：敘事\nEdge: 模板\nServer: Phi-3-mini"]
+    end
+
+    V --> FE
+    V --> AE
+    FE --> VIS
+    FE --> RPP
+    FE --> SYN
+    AE --> SYN
+    VIS --> CS
+    RPP --> CS
+    SYN --> CS
+    CS --> GP
+    GP --> CC
+    CC --> SC
+    SC --> L1
+    SC --> L2
+    SC --> L3
+```
+
+---
+
+## 十、流程各節點使用資料集
+
+| 節點 | 資料集 | 用途 | 有無音訊 |
+|---|---|---|---|
+| **Visual 弱分類器訓練** | FF++ c23（1000r + 4000f） | within-domain 訓練基準 | 無 |
+| **Visual 弱分類器評估** | FF++ c23（within） | 偵測率基準 AUC | 無 |
+| | CelebDF v2（cross） | 跨域泛化 AUC | 無 |
+| | DFDC（cross） | 額外跨域驗證 | 有（部分）|
+| **rPPG sanity check** | PURE / UBFC | SNR 基準（真人生理訊號） | 無 |
+| **rPPG deepfake 評估** | FF++ c23 small sample | real/fake SNR 差異 | 無 |
+| | FakeAVCeleb v1.2 | 有音訊的多模態偽造 | 有 |
+| **SyncNet 評估** | DFDC | within-domain AUC 84.4% | 有 |
+| | DF-TIMIT | within-domain AUC 96.6% | 有 |
+| | FakeAVCeleb v1.2 | 多類別 av_sync 評估 | 有 |
+| **GP Solver 輸入** | 三組 12-col CSV | sample_id 對齊，計算 Pareto | — |
+| **Threshold sweep** | FF++ c23 / CelebDF v2 | FAR-FRR 曲線，EER 計算 | — |
+| **壓縮降解測試（未來）** | FF++ c23→c40 重壓縮 | CRF=23/28/34/40/51 AUC 曲線 | — |
+
+---
+
+## 十一、Week 14 任務分配
+
+### A 組：繼續各自負責的弱分類器
+
+| 負責人 | 任務 | 資料集 |
 |---|---|---|
-| P1 | `collect_scores.py` 12-col CSV + try-except never drop | 劭瑋 |
-| P1 | `FusionResult` 加 trigger / trigger_reason / evidence 欄位 | 劭瑋 |
-| P1 | rPPG `_detect_impl()` 回傳 BVP waveform（已在 `get_ppg_and_snr()` 有） | 劭瑋 |
-| P2 | Grad-CAM hook 實作（`detect_with_evidence()` in `XceptionDetector`） | 禹丞 |
-| P2 | `SerialCascade.fuse()` 回傳 `exit_stage`（變數已存在，缺回傳） | 劭瑋 |
-| P3 | GP solver 加入 latency budget constraint（3D Pareto） | 靖雯 |
-| P3 | DeepfakeBench `abstract_dataset.py` 5 項修改（NPZ audio） | 劭瑋 |
+| **靖雯** | SBI / SPSL / SRM / F3Net — 升級至 12-col CSV，補 status/error_message | FF++ + CelebDF |
+| **禹丞** | Xception-ft / UCF — 升級至 12-col CSV；Xception 加 Grad-CAM hook | FF++ + CelebDF |
+| **劭瑋** | SyncNet-MDS — 升級至 12-col CSV；補 window_start_sec / window_end_sec | DFDC + FakeAVCeleb |
+
+### 亮節：Pipe 工程
+
+| 優先 | 任務 | 關鍵檔案 |
+|---|---|---|
+| P1 | `collect_scores.py` — 12-col，try-except，never drop failed rows | `scripts/collect_scores.py`（新建）|
+| P1 | `audio_extractor.extract_to_array()` — PCM ndarray，no temp file | `preprocessing/audio_extractor.py` |
+| P2 | `face_extractor._filter_single_face_frames()` + `_smooth_bboxes()` | `preprocessing/face_extractor.py` |
+| P2 | `_save_cache()` 嵌入 audio_samples + frame_to_audio_offset（NPZ） | `preprocessing/face_extractor.py` |
+| P3 | DeepfakeBench `abstract_dataset.py` 5 項修改（video_name / npz_path / audio） | `DeepfakeBench/training/dataset/` |
+
+### 曉蓮：Fusion 工程
+
+| 優先 | 任務 | 關鍵檔案 |
+|---|---|---|
+| P1 | `FusionResult` 加 `trigger` / `trigger_reason` / `evidence` 欄位 | `fusion/weighted_ensemble.py` |
+| P1 | `SerialCascade.fuse()` 回傳 `exit_stage`（local 變數已存在，缺寫入） | `fusion/serial_cascade.py` |
+| P1 | rPPG `_detect_impl()` 回傳 BVP waveform（`get_ppg_and_snr()` 已有） | `detectors/rppg_detector.py` |
+| P2 | `cascade_selection.py` — 4 階段弱分類器選擇（AUC / 相關係數 / Pareto） | `fusion/cascade_selection.py`（新建）|
+| P2 | `ExplainNarrator` 模板模式（Layer 1–3 輸出） | `detectors/explain_narrator.py`（新建）|
+| P3 | GP solver 加入 latency budget constraint（3D Pareto 第三軸） | `fusion_solver_prod_v1.ipynb` |
