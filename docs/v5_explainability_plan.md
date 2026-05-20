@@ -257,11 +257,11 @@ done
 
 **新檔案**：`scripts/apply_compression.py`（約 30 行，呼叫 ffmpeg）
 
-**Phase 2 驗收**：消融表（7 行）+ 壓縮曲線，論文 Table 1 和 Figure 的資料來源。
+**Phase 2 驗收**：消融表（7 行）+ 壓縮曲線，guideline 附錄的效能數據來源。
 
 ---
 
-### Phase 3：Edge Profile（論文投出後）
+### Phase 3：Edge Profile（Guideline 完稿後）
 
 #### 3a. Registry 加 edge_profile
 
@@ -326,76 +326,114 @@ class LLMNarrator:
 
 ---
 
-## 論文規劃
+## Guideline 產出規劃
 
-### 定位
+### 目的與適用範圍
 
-**標題**：Multi-Modal Explainable Deepfake Detection for Edge-Deployed Fraud Call Scenarios
+**文件定位**：Anti-Deepfake-Box 詐騙電話偵測系統 — 操作人員與部署指引
 
-**vs DF-P2E 的差異化**：
+**適用對象**：
+- 電信詐騙防制中心操作人員
+- 金融機構遠端身份驗證安全團隊
+- 企業資安部門（視訊會議詐騙防護）
+- 系統整合商（edge 裝置部署）
 
-| | DF-P2E（ACM MM 2025） | ADB（本論文） |
+**本 guideline 的範圍**：系統輸出解讀、判定流程、部署規範、結果處置。不涵蓋模型訓練與 GP solver 設定（見 `technical_guide.md`）。
+
+---
+
+### Guideline 章節結構
+
+```
+§1 系統功能概述          1 頁   三模態 sandbox 架構、輸入輸出、兩種部署模式
+§2 多模態證據解讀準則    2 頁   三種證據類型的閾值意義與可信度說明
+§3 決策門檻與判定流程    1 頁   Cascade 路徑圖、各 stage 觸發條件
+§4 可解釋性報告格式      1 頁   Layer 1–3 輸出欄位定義與範例
+§5 Edge 裝置部署規範     1 頁   硬體需求、延遲預算、模態組合建議
+§6 處置建議與升級程序    1 頁   偵測到偽造時的標準作業程序
+§7 效能驗證方法          1 頁   消融實驗指引、壓縮降解測試、定期校準
+§8 限制與注意事項        0.5頁  已知邊界條件、不適用情境
+```
+
+### 各章節核心內容
+
+**§2 多模態證據解讀準則**
+
+| 證據類型 | 輸出值 | 正常範圍 | 警戒值 | 可信度說明 |
+|---|---|---|---|---|
+| Visual（Grad-CAM） | fake_score 0–1 | < 0.30 | > 0.75 | 換臉/換頭偽造最靈敏，重度壓縮（CRF>40）時降解 |
+| rPPG SNR（POS） | snr_db；fake_score | SNR > 8 dB | SNR < 2 dB | 生理訊號，不受視覺壓縮影響；光線不足時不穩 |
+| AV Sync（SyncNet） | sync_error；fake_score | error < 0.3 | error > 0.65 | 聲音克隆最靈敏；無音訊時自動略過此 stage |
+
+**§3 決策門檻與判定流程**
+
+```
+輸入影片
+  ↓
+[Stage 1: 輕量模態（rPPG POS, ~3ms）]
+  score ≥ H → 立即判 FAKE（附 rPPG 波形異常說明）
+  score ≤ L → 立即判 REAL（附正常波形確認）
+  H > score > L → 進入下一 stage
+  ↓
+[Stage 2: 中量模態（SyncNet, ~40ms）]
+  同上邏輯，附 sync timeline
+  ↓
+[Stage 3: 重量模態（XceptionNet, ~180ms）]
+  同上邏輯，附 Grad-CAM 熱圖
+  ↓
+[全程不確定] → fake_score = 0.5，標記「需人工複查」
+```
+
+**§4 可解釋性報告格式**
+
+```json
+{
+  "verdict":       "FAKE",
+  "fake_score":    0.83,
+  "confidence":    "high",
+  "trigger":       "visual",
+  "trigger_reason":"Visual score 0.83 ≥ threshold H=0.75 (Stage 3)",
+  "evidence": {
+    "visual":  {"fake_score": 0.83, "gradcam_path": "..."},
+    "rppg":    {"fake_score": 0.62, "snr_db": 3.1, "ppg_path": "..."},
+    "sync":    {"fake_score": 0.58, "sync_error": 0.44}
+  },
+  "narrative":     "偵測到臉部區域明顯偽造特徵（眼周 Grad-CAM 熱區）..."
+}
+```
+
+**§5 Edge 裝置部署規範**
+
+| 部署情境 | 啟用模態 | 記憶體需求 | 總延遲 | 適用場景 |
+|---|---|---|---|---|
+| 超輕量 | rPPG only | < 50 MB | ~3ms | 行動裝置、IoT |
+| 標準 edge | rPPG + Sync | ~130 MB | ~45ms | 嵌入式（Raspberry Pi 5） |
+| 完整 edge | rPPG + Sync + Visual | ~220 MB | ~225ms | 中端 ARM（Apple M1） |
+| Server 增強 | 全部 + LLM 敘事 | ~2.2 GB | ~700ms | 雲端 / 伺服器 |
+
+**§7 效能驗證方法**
+
+消融實驗基準（部署前驗證）：
+
+| 方法 | AUC 基準 | 說明 |
 |---|---|---|
-| 模態 | 視覺 only | 視覺 + rPPG + AV Sync |
-| 輸入 | 靜態圖片 | 影片（含時序） |
-| 解釋 | Grad-CAM + caption + LLM | +BVP 波形 + sync timeline + cascade 路徑 |
-| Edge | 無（CLIP-large + LLaMA-11B） | Cascade fail-fast，輕量模態先跑 |
-| 場景 | 通用 deepfake | 詐騙電話（音視覺偽造） |
+| Visual only (Xception) | — | guideline 附錄的效能數據來源 |
+| rPPG only (POS) | — | — |
+| Sync only (SyncNet) | — | — |
+| Visual + rPPG | — | — |
+| Visual + Sync | — | — |
+| 全三模態（fixed weight） | — | — |
+| 全三模態（GP cascade） | — | 部署目標 |
 
-### 論文結構
+壓縮降解測試（定期校準）：
 
-```
-§1 Introduction          1.5 頁   詐騙電話情境 + 現有方法兩個缺口
-§2 Related Work          1.0 頁   視覺偵測 + rPPG + AV Sync + XAI
-§3 Method                2.5 頁   架構 + 三模態 + cascade + 解釋層次
-§4 Experiments           3.0 頁   消融表 + 壓縮曲線 + edge latency
-§5 Explainability        1.0 頁   解釋範例 + vs DF-P2E 對比
-§6 Discussion            0.5 頁   Cascade 是結構性解釋 + Limitations
-```
-
-### 實驗產出目標
-
-**Table 1：消融實驗（FakeAVCeleb）**
-
-| 方法 | AUC | FAR | FRR |
-|---|---|---|---|
-| Visual only (Xception) | - | - | - |
-| rPPG only (POS) | - | - | - |
-| Sync only (SyncNet) | - | - | - |
-| Visual + rPPG | - | - | - |
-| Visual + Sync | - | - | - |
-| All modalities (fixed weight) | - | - | - |
-| All modalities (GP cascade) | **-** | **-** | **-** |
-
-**Table 2：壓縮降解（AUC vs CRF）**
-
-| 偵測器 | CRF=23 | CRF=28 | CRF=34 | CRF=40 | CRF=51 |
+| 壓縮等級 | CRF=23 | CRF=28 | CRF=34 | CRF=40 | CRF=51 |
 |---|---|---|---|---|---|
-| Xception | - | - | - | - | - |
-| SBI | - | - | - | - | - |（預期最穩）
-| rPPG POS | - | - | - | - | - |（預期不變）
-| GP Cascade | - | - | - | - | - |
+| Visual AUC | — | — | — | — | — |
+| rPPG（預期不變） | — | — | — | — | — |
+| GP Cascade | — | — | — | — | — |
 
-**Table 3：Edge Latency Profile**
-
-| 偵測器 | 模型大小 | CPU latency | 需 GPU |
-|---|---|---|---|
-| rPPG POS | 0 MB | ~3ms | No |
-| SyncNet | ~30 MB | ~40ms | No |
-| XceptionNet | ~92 MB | ~180ms | No |
-| Phi-3-mini (敘事) | ~2 GB | ~500ms | No |
-
-**Figure：三模態解釋視覺化**
-- 詐騙電話截圖 + 三欄：Grad-CAM 熱圖 / BVP 波形 + SNR / Sync timeline
-- 對比 DF-P2E：只有左欄（視覺）vs ADB：三欄全有
-
-### 投稿目標
-
-| 選項 | 截稿 | 說明 |
-|---|---|---|
-| **IEEE TIFS**（期刊） | Rolling | 多模態鑑識最對口，無截稿壓力，優先考慮 |
-| ACM MM 2026 | ~2026/03 | DF-P2E 在這裡發，follow-up 最自然 |
-| Media Forensics Workshop | ~2026/03 | 4 頁短論文，快速發表中間成果 |
+警示：Cascade AUC 低於 0.60 於任意壓縮等級時，應重新調整 GP solver 閾值。
 
 ---
 
@@ -405,12 +443,12 @@ class LLMNarrator:
 |---|---|---|
 | Week 1–2 | Phase 1 完成 | `--explain` 模式可用，FusionResult 有 trigger/evidence |
 | Week 3 | 取得資料集 | FF++ + FakeAVCeleb 可跑 |
-| Week 4–5 | Phase 2 消融實驗 | Table 1 數字 |
-| Week 6 | 壓縮降解實驗 | Table 2 + Figure |
-| Week 7 | Grad-CAM 視覺化 | Figure 解釋視覺化 |
-| Week 8 | 論文初稿 | §1–§4 完成 |
-| Week 9 | DF-P2E 對比 + §5 | 完稿 |
-| Week 10+ | Phase 3（Edge profile + LLM） | Table 3 + 加分項 |
+| Week 4–5 | Phase 2 消融實驗 | guideline §7 效能基準表填入數字 |
+| Week 6 | 壓縮降解實驗 | guideline §7 壓縮降解表 + Grad-CAM 視覺化範例 |
+| Week 7 | Guideline §1–§5 初稿 | 系統說明 + 證據解讀 + 報告格式完稿 |
+| Week 8 | Guideline §6–§8 + 審閱 | 處置建議 + 限制條款；內部 review |
+| Week 9 | Guideline 完稿 | guideline PDF + 配套操作範例 |
+| Week 10+ | Phase 3（Edge profile + LLM） | guideline 附錄：Phi-3-mini 敘事模組 |
 
 ---
 
@@ -440,12 +478,6 @@ Server 補強：
   或使用者主動請求詳細說明時才跑
 ```
 
-### 與 DF-P2E 的引用關係
-
-DF-P2E 是最直接的 related work（ACM MM 2025，Grad-CAM + caption + LLM 框架的先行者）。  
-ADB 不是競爭，而是在其基礎上擴展到：多模態影片 + 生理訊號 + 時序解釋 + edge 部署。  
-論文中 cite DF-P2E，說明「我們將其擴展至多模態音視覺場景，並針對邊緣裝置的延遲限制重新設計解釋架構」。
-
 ---
 
 ## 依賴套件（新增）
@@ -461,6 +493,6 @@ pip install torch torchvision                       # 已有
 # 實驗（壓縮）
 apt-get install -y ffmpeg   # 已有
 
-# 視覺化（optional，for paper figures）
+# 視覺化（guideline 附錄圖表 + Grad-CAM 輸出）
 pip install matplotlib seaborn
 ```
